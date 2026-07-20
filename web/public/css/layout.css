@@ -1,0 +1,403 @@
+/* ==========================================================================
+   Q-Net 기출 풀이 — layout.css
+   셸(헤더/배너/본문 그리드/푸터) · 사이드바 · 브레드크럼 · 라우트 전환 · 반응형.
+   body 상태 클래스 계약(라우터 구현):
+     · 기본            → 사이드바 노출(데스크톱 in-grid, 모바일 오프캔버스)
+     · route-solve     → 사이드바 오프캔버스(몰입 모드, 기본 접힘)
+     · sidebar-open    → 오프캔버스 사이드바를 슬라이드 인(그림자 + 스크림)
+   ========================================================================== */
+
+/* --------------------------------------------------------------------------
+   헤더(sticky · 반투명 blur)
+   -------------------------------------------------------------------------- */
+.shell-header {
+  position: sticky;
+  top: 0;
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: var(--header-h);
+  padding: 10px 24px;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--surface) 82%, transparent);
+  backdrop-filter: saturate(1.6) blur(8px);
+  -webkit-backdrop-filter: saturate(1.6) blur(8px);
+}
+
+/* 브랜드: 사이드바 토글 + 로고 마크 + 타이틀 */
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.brand-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  background: var(--accent);
+  color: var(--accent-fg-on);
+  font-weight: 800;
+  font-size: 15px;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  box-shadow: var(--shadow-1);
+  flex: 0 0 auto;
+}
+
+.shell-header h1 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+}
+
+/* 헤더 우측 액션 묶음(CLI 도트 · 테마 토글 · 닉네임) */
+.shell-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* 사이드바/테마 토글 아이콘 버튼 — 정사각 근사 */
+.sidebar-toggle,
+.theme-toggle {
+  min-width: 34px;
+  justify-content: center;
+}
+
+/* CLI 상태 도트(헤더) — ok/warn */
+.cli-dot {
+  display: inline-flex;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--fg-faint);
+}
+
+.cli-dot.ok   { background: var(--ok); }
+.cli-dot.warn { background: var(--warn); }
+.cli-dot[hidden] { display: none; }
+
+/* 닉네임 영역(우측) — 드롭다운 앵커 */
+.nickname-area {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  color: var(--fg-muted);
+}
+
+/* --------------------------------------------------------------------------
+   CLI 감지 상태 배너 — 슬림 스트립(기본 경고, .ok 성공)
+   -------------------------------------------------------------------------- */
+.cli-banner {
+  margin: 0;
+  padding: 7px 24px;
+  font-size: 13px;
+  border-bottom: 1px solid var(--border);
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+
+.cli-banner::before {
+  content: "\25CF"; /* ● 상태 도트 */
+  margin-right: 8px;
+  font-size: 10px;
+  vertical-align: middle;
+}
+
+.cli-banner.ok {
+  background: var(--ok-soft);
+  color: var(--ok);
+}
+
+.cli-banner[hidden] {
+  display: none;
+}
+
+/* --------------------------------------------------------------------------
+   본문 그리드 — 사이드바(260px) + 메인
+   -------------------------------------------------------------------------- */
+.shell-body {
+  display: grid;
+  grid-template-columns: var(--sidebar-w) minmax(0, 1fr);
+  align-items: start;
+}
+
+.shell-main {
+  min-width: 0;
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 24px;
+  width: 100%;
+}
+
+/* --------------------------------------------------------------------------
+   사이드바
+   -------------------------------------------------------------------------- */
+.shell-sidebar {
+  position: sticky;
+  top: var(--header-h);
+  align-self: start;
+  height: calc(100vh - var(--header-h));
+  overflow-y: auto;
+  border-right: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.sidebar-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 16px 12px;
+}
+
+.sidebar-home {
+  display: block;
+  padding: 8px 10px;
+  border-radius: var(--radius-s);
+  color: var(--fg);
+  text-decoration: none;
+  font-weight: 600;
+  font-size: 14px;
+  transition: background .15s ease, color .15s ease;
+}
+
+.sidebar-home:hover {
+  background: var(--surface-2);
+}
+
+.sidebar-group {
+  margin-top: 10px;
+}
+
+.sidebar-group-title {
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  color: var(--fg-faint);
+}
+
+.sidebar-list {
+  list-style: none;
+  margin: 2px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.sidebar-link {
+  display: block;
+  padding: 7px 10px;
+  border-radius: var(--radius-s);
+  color: var(--fg-muted);
+  text-decoration: none;
+  font-size: 14px;
+  transition: background .15s ease, color .15s ease;
+}
+
+.sidebar-link:hover {
+  background: var(--surface-2);
+  color: var(--fg);
+}
+
+.sidebar-link.active,
+.sidebar-link[aria-current="page"] {
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.sidebar-empty {
+  padding: 8px 10px;
+}
+
+.sidebar-add {
+  margin-top: 12px;
+  width: 100%;
+  text-align: left;
+  padding: 9px 10px;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-s);
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background .15s ease, border-color .15s ease;
+}
+
+.sidebar-add:hover {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+
+/* --------------------------------------------------------------------------
+   오프캔버스 사이드바 — 풀이 몰입 모드(route-solve)
+   -------------------------------------------------------------------------- */
+body.route-solve .shell-body {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+body.route-solve .shell-sidebar {
+  position: fixed;
+  top: var(--header-h);
+  left: 0;
+  width: var(--sidebar-w);
+  height: calc(100vh - var(--header-h));
+  transform: translateX(-100%);
+  transition: transform .2s ease;
+  z-index: 150;
+}
+
+body.route-solve.sidebar-open .shell-sidebar {
+  transform: translateX(0);
+  box-shadow: var(--shadow-2);
+}
+
+/* 오프캔버스 스크림(순수 시각 — 클릭 통과) */
+body.route-solve.sidebar-open::before {
+  content: "";
+  position: fixed;
+  inset: var(--header-h) 0 0 0;
+  z-index: 140;
+  background: var(--scrim);
+  pointer-events: none;
+}
+
+/* --------------------------------------------------------------------------
+   푸터 · 연결 상태
+   -------------------------------------------------------------------------- */
+.app-footer {
+  padding: 10px 24px;
+  font-size: 12.5px;
+  color: var(--fg-faint);
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.conn-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.conn-status::before {
+  content: "\25CF"; /* ● */
+  font-size: 9px;
+  color: var(--fg-faint);
+}
+
+.conn-status.on::before  { color: var(--ok); }
+.conn-status.off::before { color: var(--danger); }
+
+/* --------------------------------------------------------------------------
+   브레드크럼
+   -------------------------------------------------------------------------- */
+.crumb {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 16px;
+  font-size: 13px;
+  color: var(--fg-muted);
+}
+
+.crumb-link {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.crumb-link:hover {
+  text-decoration: underline;
+}
+
+.crumb-sep {
+  color: var(--fg-faint);
+}
+
+.crumb-seg {
+  color: var(--fg-muted);
+}
+
+.crumb-seg.cert-current {
+  color: var(--fg);
+  font-weight: 600;
+}
+
+/* 라우트 로드 실패 폴백 */
+.route-error {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 24px;
+}
+
+/* --------------------------------------------------------------------------
+   반응형 — 1000px 미만: 사이드바 오프캔버스(전 라우트)
+   -------------------------------------------------------------------------- */
+@media (max-width: 1000px) {
+  .shell-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .shell-sidebar {
+    position: fixed;
+    top: var(--header-h);
+    left: 0;
+    width: var(--sidebar-w);
+    max-width: 84vw;
+    height: calc(100vh - var(--header-h));
+    transform: translateX(-100%);
+    transition: transform .2s ease;
+    z-index: 150;
+  }
+
+  body.sidebar-open .shell-sidebar {
+    transform: translateX(0);
+    box-shadow: var(--shadow-2);
+  }
+
+  body.sidebar-open::before {
+    content: "";
+    position: fixed;
+    inset: var(--header-h) 0 0 0;
+    z-index: 140;
+    background: var(--scrim);
+    pointer-events: none;
+  }
+}
+
+/* --------------------------------------------------------------------------
+   반응형 — 640px 미만: 여백 축소
+   -------------------------------------------------------------------------- */
+@media (max-width: 640px) {
+  .shell-header {
+    padding: 10px 16px;
+  }
+
+  .shell-main {
+    padding: 16px;
+  }
+
+  .cli-banner,
+  .app-footer {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+}

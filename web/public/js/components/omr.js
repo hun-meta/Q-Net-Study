@@ -47,7 +47,14 @@ export async function renderOmr(container, ctx) {
       if (container.isConnected) renderOmr(container, ctx).catch(() => {});
     };
     window.addEventListener('qnet:fs-change', onFs);
-    return null;
+    // 미등록 컨트롤러: 채점 불가(등록:false). solve 언마운트 시 fs-change 리스너를
+    // 정리할 수 있도록 unmount() 를 제공한다(null 대신).
+    return {
+      등록: false,
+      unmount() {
+        window.removeEventListener('qnet:fs-change', onFs);
+      },
+    };
   }
 
   // 상태: 답(1~4), 찍음(bool). 이어풀기용 드래프트 선로드.
@@ -177,9 +184,20 @@ export async function renderOmr(container, ctx) {
     if (rowRefs[n]) setCurrent(n);
   }
 
-  // 초기 현재 문항: 첫 문항.
-  const first = 구조.과목들 && 구조.과목들[0] ? 구조.과목들[0].시작 : null;
-  if (first != null) setCurrent(first);
+  // 초기 현재 문항: 드래프트(이어풀기) 복원 시 첫 미응답 문항(전부 응답됐으면 마지막),
+  // 드래프트가 없으면 첫 문항. 이어풀기 진입에서 커서가 1번으로 돌아가 이미 푼 문항을
+  // 덮어쓰는 것을 막는다.
+  const orderedNos = [];
+  for (const subj of 구조.과목들 || []) {
+    for (let n = subj.시작; n <= subj.끝; n += 1) {
+      if (rowRefs[n]) orderedNos.push(n);
+    }
+  }
+  if (orderedNos.length) {
+    const firstUnanswered = orderedNos.find((n) => answers[n] == null);
+    const initialN = firstUnanswered != null ? firstUnanswered : orderedNos[orderedNos.length - 1];
+    setCurrent(initialN);
+  }
 
   // --- 디바운스 임시저장 ---
   let saveTimer = null;

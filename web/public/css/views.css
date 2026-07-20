@@ -1,0 +1,1775 @@
+/* ==========================================================================
+   Q-Net 기출 풀이 — views.css
+   화면별: 온보딩 · 대시보드 · 자격증 상세 · 업로드 · 닉네임 · 풀이(솔브바/OMR/도구) ·
+           결과 · 챗 · 개념(md 타이포).
+   데이터 기반 인라인 스타일(게이지 width, marker left, 진행바 width)은 JS 담당 —
+   여기서는 트랙·색만 관장한다.
+   ========================================================================== */
+
+/* ==========================================================================
+   온보딩 (views/onboarding.js)
+   ========================================================================== */
+.onb {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: calc(100vh - var(--header-h) - 120px);
+  padding: 24px 0;
+}
+
+.onb-card {
+  width: 100%;
+  max-width: 420px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 28px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-l);
+  background: var(--surface);
+  box-shadow: var(--shadow-2);
+}
+
+.onb-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.onb-title {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+}
+
+.onb-lead {
+  margin: 0;
+  color: var(--fg-muted);
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.onb-field {
+  gap: 6px;
+}
+
+.onb-new-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.onb-new-row input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.onb-start {
+  flex: 0 0 auto;
+}
+
+.onb-err:empty {
+  display: none;
+}
+
+/* ==========================================================================
+   대시보드 (views/dashboard.js)
+   ========================================================================== */
+.dash {
+  display: flex;
+  flex-direction: column;
+  gap: 26px;
+}
+
+/* ── 이어풀기 CTA(액센트 대형 버튼형 카드) ── */
+.dash-cta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 16px 20px;
+  min-height: 60px;
+  text-align: left;
+  border-radius: var(--radius-l);
+  font-size: 15px;
+  box-shadow: var(--shadow-1);
+}
+
+.dash-cta-icon {
+  font-size: 16px;
+  flex: 0 0 auto;
+}
+
+.dash-cta-label {
+  font-weight: 700;
+}
+
+.dash-cta-cert {
+  margin-left: auto;
+  font-size: 13px;
+  font-weight: 500;
+  opacity: .85;
+  white-space: nowrap;
+}
+
+.dash-cta-more {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+/* ── 섹션 타이틀 · 빈 상태 ── */
+.dash-section-title {
+  margin: 0 0 12px;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.dash-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 20px;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-m);
+  color: var(--fg-muted);
+}
+
+.dash-empty p {
+  margin: 0;
+}
+
+/* ── 내 현황 스탯 그리드(4열, 모바일 2열) ── */
+.dash-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+}
+
+.dash-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-m);
+  background: var(--surface);
+  box-shadow: var(--shadow-1);
+}
+
+.dash-stat .badge {
+  align-self: flex-start;
+  margin-top: 2px;
+}
+
+.dash-stat .muted {
+  font-size: 12px;
+}
+
+/* 스탯 라벨/값(결과 화면과 공용) */
+.stat-label {
+  font-size: 12px;
+  color: var(--fg-muted);
+}
+
+.stat-value {
+  font-size: 20px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 스파크라인(총점 추이) — 선/점은 currentColor */
+.sparkline {
+  color: var(--accent);
+  display: block;
+  margin-top: 2px;
+}
+
+/* ── 자격증 카드 그리드 ── */
+.dash-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 14px;
+}
+
+.dash-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  min-height: 128px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-l);
+  background: var(--surface);
+  box-shadow: var(--shadow-1);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color .15s ease, box-shadow .15s ease, transform .15s ease;
+}
+
+.dash-card:hover {
+  border-color: var(--border-strong);
+  box-shadow: var(--shadow-2);
+  transform: translateY(-1px);
+}
+
+.dash-card-title {
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.dash-card-field {
+  font-size: 12px;
+  color: var(--fg-muted);
+}
+
+.dash-card-stats {
+  margin-top: 4px;
+  font-size: 13px;
+  color: var(--fg-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.dash-card-recent {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: auto;
+  padding-top: 6px;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── 새 자격증 등록(dashed 카드 + 인라인 폼) ── */
+.dash-card-add {
+  padding: 0;
+  border-style: dashed;
+  background: transparent;
+  box-shadow: none;
+  cursor: default;
+}
+
+.dash-add-open {
+  width: 100%;
+  min-height: 128px;
+  padding: 20px 16px;
+  border: none;
+  border-radius: var(--radius-l);
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background .15s ease;
+}
+
+.dash-add-open:hover {
+  background: var(--accent-soft);
+}
+
+.dash-add-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+}
+
+.dash-add-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* ── 스켈레톤 ── */
+.dash-status-skel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.dash-title-skel {
+  width: 120px;
+  height: 20px;
+}
+
+.dash-stat-skel {
+  height: 84px;
+}
+
+.dash-card-skel {
+  height: 128px;
+  border-radius: var(--radius-l);
+}
+
+/* ==========================================================================
+   자격증 상세 (views/certDetail.js)
+   ========================================================================== */
+.cert {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.cert-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.cert-title {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+}
+
+.cert-list-wrap {
+  min-width: 0;
+}
+
+.skeleton-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.cert-row-skel {
+  height: 58px;
+}
+
+/* 기출 목록 */
+.cert-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.cert-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-m);
+  background: var(--surface);
+  box-shadow: var(--shadow-1);
+  cursor: pointer;
+  transition: border-color .15s ease, box-shadow .15s ease, transform .15s ease;
+}
+
+.cert-row:hover {
+  border-color: var(--border-strong);
+  box-shadow: var(--shadow-2);
+  transform: translateY(-1px);
+}
+
+.cert-row-badges {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  flex: 0 0 auto;
+}
+
+.cert-row-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.cert-row-id {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.cert-row-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.cert-row-score {
+  color: var(--fg-muted);
+}
+
+/* 잠김 행 — 감쇠(클릭 시 안내) */
+.cert-row-locked {
+  opacity: .62;
+}
+
+.cert-row-locked:hover {
+  transform: none;
+}
+
+/* 빈 상태 */
+.cert-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 24px;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-m);
+  color: var(--fg-muted);
+}
+
+.cert-empty p {
+  margin: 0;
+}
+
+/* ── 접이식 업로드 패널 ── */
+.cert-upload {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-m);
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.cert-upload-summary {
+  padding: 12px 16px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  list-style: none;
+}
+
+.cert-upload-summary::-webkit-details-marker {
+  display: none;
+}
+
+.cert-upload-summary::before {
+  content: "▸";
+  margin-right: 8px;
+  color: var(--fg-faint);
+  transition: transform .15s ease;
+  display: inline-block;
+}
+
+.cert-upload[open] .cert-upload-summary::before {
+  transform: rotate(90deg);
+}
+
+.cert-upload[open] .cert-upload-summary {
+  border-bottom: 1px solid var(--border);
+}
+
+.cert-upload-body {
+  padding: 16px;
+}
+
+/* ==========================================================================
+   업로드 / 수동 정답 (components/upload.js)
+   ========================================================================== */
+.upload-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.upload-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+/* 드롭존(드래그오버 상태) */
+.upload-dropzone {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 120px;
+  padding: 20px;
+  border: 2px dashed var(--border-strong);
+  border-radius: var(--radius-m);
+  background: var(--surface-2);
+  text-align: center;
+  cursor: pointer;
+  transition: border-color .15s ease, background .15s ease;
+}
+
+.upload-dropzone:hover {
+  border-color: var(--accent);
+}
+
+.upload-dropzone.dragover {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.upload-drop-hint {
+  font-size: 14px;
+  color: var(--fg-muted);
+}
+
+/* 파일 인풋은 숨김 — 드롭존 클릭이 트리거 */
+.upload-file-input {
+  display: none;
+}
+
+/* 단계 진행(업로드→판독→검증→등록) */
+.upload-steps {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.upload-step {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  padding: 5px 12px 5px 28px;
+  font-size: 13px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--fg-muted);
+}
+
+/* 단계 도트/체크 */
+.upload-step::before {
+  content: "";
+  position: absolute;
+  left: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--border-strong);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.upload-step[data-state="active"] {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.upload-step[data-state="active"]::before {
+  background: var(--accent);
+}
+
+.upload-step[data-state="done"] {
+  background: var(--ok-soft);
+  color: var(--ok);
+}
+
+.upload-step[data-state="done"]::before {
+  content: "✓";
+  background: transparent;
+  color: var(--ok);
+}
+
+.upload-step[data-state="error"] {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.upload-step[data-state="error"]::before {
+  content: "!";
+  background: transparent;
+  color: var(--danger);
+}
+
+.upload-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* ── 수동 정답 입력 폼 ── */
+.upload-manual:empty {
+  display: none;
+}
+
+.manual-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 12px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-m);
+  background: var(--surface-2);
+}
+
+.manual-form h4 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.manual-form > p {
+  margin: 0;
+  color: var(--fg-muted);
+  font-size: 13px;
+}
+
+/* .ufield: 캡션(muted, block) + 인풋 풀폭 */
+.ufield > span {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 12.5px;
+  color: var(--fg-muted);
+}
+
+.ufield input[type="text"],
+.ufield input[type="number"],
+.ufield input[type="file"] {
+  width: 100%;
+}
+
+.manual-subjects {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.manual-subject-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.manual-subject-row input[type="text"] {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.manual-subject-row input[type="number"] {
+  width: 5rem;
+  flex: 0 0 auto;
+}
+
+/* 답안 그리드 우물 */
+.manual-grid {
+  max-height: 40vh;
+  overflow: auto;
+  margin: 4px 0;
+  padding: 10px 12px;
+  border-radius: var(--radius-m);
+  background: var(--surface);
+  border: 1px solid var(--border);
+}
+
+.manual-grid:empty {
+  display: none;
+}
+
+.manual-save {
+  align-self: flex-start;
+  margin-top: 4px;
+}
+
+/* ==========================================================================
+   닉네임 메뉴 (components/nicknameMenu.js)
+   ========================================================================== */
+.nick-menu-wrap {
+  position: relative;
+}
+
+/* 칩(드롭다운 트리거) */
+.nick-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 12px;
+  min-height: 32px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font: inherit;
+  font-weight: 600;
+  font-size: 13px;
+  cursor: pointer;
+  transition: border-color .15s ease, background .15s ease;
+}
+
+.nick-chip:hover {
+  border-color: var(--accent);
+}
+
+/* 드롭다운 메뉴 카드 */
+.nick-menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  z-index: 300;
+  min-width: 180px;
+  display: flex;
+  flex-direction: column;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-m);
+  background: var(--surface);
+  box-shadow: var(--shadow-2);
+}
+
+.nick-menu-item {
+  text-align: left;
+  padding: 8px 10px;
+  border: none;
+  border-radius: var(--radius-s);
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
+  transition: background .15s ease, color .15s ease;
+}
+
+.nick-menu-item:hover {
+  background: var(--surface-2);
+}
+
+.nick-menu-item.danger {
+  color: var(--danger);
+}
+
+.nick-menu-item.danger:hover {
+  background: var(--danger-soft);
+}
+
+/* 인라인 변경 패널(칩 아래 부유 카드) */
+.nick-change {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  z-index: 300;
+  width: 260px;
+  max-width: 84vw;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-m);
+  background: var(--surface);
+  box-shadow: var(--shadow-2);
+}
+
+.nick-change .btn {
+  align-self: flex-start;
+}
+
+.nick-change-new {
+  width: 100%;
+}
+
+/* ==========================================================================
+   풀이 몰입 모드 (views/solve.js)
+   ========================================================================== */
+.solve {
+  display: flex;
+  flex-direction: column;
+}
+
+/* ── 솔브바(sticky) ── */
+.solve-bar {
+  position: sticky;
+  top: var(--header-h);
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 10px 14px;
+  margin-bottom: 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-m);
+  background: color-mix(in srgb, var(--surface) 88%, transparent);
+  backdrop-filter: saturate(1.4) blur(8px);
+  -webkit-backdrop-filter: saturate(1.4) blur(8px);
+  box-shadow: var(--shadow-1);
+}
+
+.solve-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  border-radius: var(--radius-s);
+  color: var(--fg-muted);
+  text-decoration: none;
+  font-size: 14px;
+  transition: background .15s ease, color .15s ease;
+}
+
+.solve-back:hover {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.solve-back-label {
+  font-weight: 600;
+  max-width: 30vw;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.solve-examid {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.solve-progress {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1 1 180px;
+  min-width: 120px;
+}
+
+.solve-progress-text {
+  font-size: 13px;
+  color: var(--fg-muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.solve-progressbar {
+  flex: 1 1 auto;
+  min-width: 60px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  overflow: hidden;
+}
+
+.solve-progressbar-fill {
+  height: 100%;
+  width: 0%;
+  border-radius: 999px;
+  background: var(--accent);
+  transition: width .2s ease;
+}
+
+.solve-elapsed {
+  font-size: 13px;
+  color: var(--fg-muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.solve-status {
+  font-size: 13px;
+  color: var(--fg-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.solve-status.ok {
+  color: var(--ok);
+}
+
+/* ── 본문: 뷰어(넓게) + OMR 레일(고정 스크롤) ── */
+.solve-body {
+  display: flex;
+  gap: 20px;
+  align-items: flex-start;
+}
+
+.solve-viewer {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 12px;
+  border-radius: var(--radius-m);
+  background: var(--surface-2);
+}
+
+.solve-viewer canvas {
+  display: block;
+  margin: 0 auto 12px;
+  max-width: 100%;
+  border-radius: var(--radius-s);
+  box-shadow: var(--shadow-2);
+}
+
+/* OMR 레일 카드(sticky) */
+.omr-rail {
+  flex: 0 0 360px;
+  max-width: 360px;
+  position: sticky;
+  top: calc(var(--header-h) + 66px);
+  max-height: calc(100vh - var(--header-h) - 84px);
+  overflow-y: auto;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-l);
+  background: var(--surface);
+  box-shadow: var(--shadow-1);
+}
+
+/* ── 도구 패널(우측 슬라이드 오버) ── */
+.solve-tool {
+  position: fixed;
+  top: var(--header-h);
+  right: 0;
+  z-index: 500;
+  width: 400px;
+  max-width: 92vw;
+  height: calc(100vh - var(--header-h));
+  display: flex;
+  flex-direction: column;
+  border-left: 1px solid var(--border);
+  background: var(--surface);
+  box-shadow: var(--shadow-2);
+  transform: translateX(100%);
+  transition: transform .2s ease;
+}
+
+.solve-tool.open {
+  transform: translateX(0);
+}
+
+/* hidden 속성이면 완전 제거(display로 UA [hidden]을 덮지 않도록 명시) */
+.solve-tool[hidden] {
+  display: none;
+}
+
+.solve-tool-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.solve-tool-title {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.solve-tool-chip {
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.solve-tool-close {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--fg-muted);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background .15s ease, color .15s ease;
+}
+
+.solve-tool-close:hover {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.solve-tool-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 14px 16px;
+}
+
+.solve-tool-loading {
+  color: var(--fg-muted);
+  font-size: 14px;
+}
+
+/* ==========================================================================
+   OMR (components/omr.js) — v1 이관 + 현재 문항 하이라이트
+   ========================================================================== */
+.omr-subject {
+  margin: 14px 0 6px;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: .02em;
+  color: var(--fg-muted);
+}
+
+.omr-subject:first-child {
+  margin-top: 2px;
+}
+
+.omr-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 6px;
+  border-radius: var(--radius-s);
+  flex-wrap: wrap;
+  transition: background .15s ease, box-shadow .15s ease;
+}
+
+.omr-row:hover {
+  background: var(--surface-2);
+}
+
+/* 현재 문항 — 액센트 하이라이트(좌측 바 + soft 배경) */
+.omr-row.current {
+  background: var(--accent-soft);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.omr-row .qno {
+  width: 2.2rem;
+  text-align: right;
+  color: var(--fg-muted);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 보기 버튼 — 원형(pill) */
+.omr-opt {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 32px;
+  height: 32px;
+  padding: 0 6px;
+  font: inherit;
+  font-size: 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--fg);
+  cursor: pointer;
+  transition: background .15s ease, border-color .15s ease, color .15s ease;
+}
+
+.omr-opt:hover {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+
+.omr-opt.sel {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-fg-on);
+}
+
+/* 찍음 토글 칩 */
+.omr-mark {
+  margin-left: 4px;
+  padding: 4px 8px;
+  min-height: 32px;
+  display: inline-flex;
+  align-items: center;
+  font-size: 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  color: var(--fg-faint);
+  cursor: pointer;
+  user-select: none;
+  transition: background .15s ease, border-color .15s ease, color .15s ease;
+}
+
+.omr-mark.on {
+  background: var(--danger-soft);
+  border-color: var(--danger);
+  color: var(--danger);
+  font-weight: 600;
+}
+
+/* 문항 도구(개념/챗) — ghost 미니 버튼 */
+.omr-qtool {
+  margin-left: 2px;
+  padding: 4px 8px;
+  min-height: 32px;
+  display: inline-flex;
+  align-items: center;
+  font: inherit;
+  font-size: 12px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--fg-muted);
+  cursor: pointer;
+  transition: background .15s ease, color .15s ease;
+}
+
+.omr-qtool:hover {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+/* ==========================================================================
+   채점 결과 (components/result.js)
+   ========================================================================== */
+.result-area {
+  margin-top: 28px;
+  /* 제출 후 자동 스크롤(scrollIntoView block:start) 시 sticky 솔브바(top: --header-h)에
+     히어로 상단이 가려지지 않도록, 솔브바 높이+여백(레일 오프셋과 동일한 66px)에
+     여유 12px를 더해 스크롤 앵커를 내린다. */
+  scroll-margin-top: calc(var(--header-h) + 66px + 12px);
+}
+
+/* ── 채점 히어로 ── */
+.result-hero {
+  padding: 22px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-l);
+  background: var(--surface);
+  box-shadow: var(--shadow-2);
+}
+
+.result-hero-caption {
+  font-size: 13px;
+  color: var(--fg-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.result-hero-main {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  flex-wrap: wrap;
+  margin: 12px 0 16px;
+}
+
+.result-hero-score {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.result-hero-score-value {
+  font-size: 40px;
+  font-weight: 800;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.result-hero-score-label {
+  font-size: 12px;
+  color: var(--fg-muted);
+}
+
+.result-hero-conf {
+  margin-left: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  text-align: right;
+}
+
+.result-hero-conf-value {
+  font-size: 22px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.result-hero-conf-label {
+  font-size: 12px;
+  color: var(--fg-muted);
+}
+
+/* 판정 배지 */
+.result-verdict {
+  display: inline-flex;
+  align-items: center;
+  padding: 5px 12px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.result-verdict.pass {
+  background: var(--ok-soft);
+  color: var(--ok);
+}
+
+.result-verdict.fail {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+/* 과락 — 진한 danger 필 + 대비 텍스트 */
+.result-verdict.fail.flunk {
+  background: var(--danger);
+  color: var(--accent-fg-on);
+}
+
+/* 히어로 내 스탯 요약(2열) */
+.result-summary {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+}
+
+.result-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 14px;
+  border-radius: var(--radius-m);
+  background: var(--surface-2);
+}
+
+/* ── 과목별 게이지 ── */
+.result-gauges {
+  margin-top: 18px;
+  padding: 18px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-l);
+  background: var(--surface);
+}
+
+.result-subtitle {
+  margin: 0 0 12px;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.result-gauge-row {
+  display: grid;
+  grid-template-columns: minmax(72px, 140px) 1fr auto;
+  gap: 12px;
+  align-items: center;
+  margin: 10px 0;
+}
+
+.result-gauge-label {
+  font-size: 13px;
+}
+
+.result-gauge-row.flunk .result-gauge-label {
+  color: var(--danger);
+  font-weight: 600;
+}
+
+/* 트랙 + 채움 + 40점 과락 기준선 마커(left는 JS) */
+.result-gauge-track {
+  position: relative;
+  height: 12px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  overflow: hidden;
+}
+
+.result-gauge-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: var(--accent);
+  transition: width .3s ease;
+}
+
+.result-gauge-fill.danger {
+  background: var(--danger);
+}
+
+.result-gauge-marker {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--fg);
+  opacity: .55;
+}
+
+.result-gauge-value {
+  font-size: 13px;
+  font-weight: 600;
+  text-align: right;
+  min-width: 40px;
+  font-variant-numeric: tabular-nums;
+}
+
+.result-gauge-flag {
+  margin-left: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--danger);
+}
+
+/* ── 시도 추이 ── */
+.result-trend {
+  margin-top: 18px;
+  padding: 18px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-l);
+  background: var(--surface);
+}
+
+.result-trend-chart {
+  display: block;
+  width: 100%;
+  height: 90px;
+}
+
+.result-trend-passline {
+  stroke: var(--border-strong);
+  stroke-width: 1;
+  stroke-dasharray: 4 4;
+}
+
+.result-trend-path {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2;
+}
+
+.result-trend-point {
+  fill: var(--accent);
+}
+
+.result-trend-caption {
+  margin-top: 8px;
+  font-size: 13px;
+  color: var(--fg-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── 키워드 보강 폼 ── */
+.result-keywords {
+  margin-top: 18px;
+  padding: 18px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-l);
+  background: var(--surface);
+}
+
+.result-hint {
+  margin: 0 0 12px;
+  font-size: 13px;
+  color: var(--fg-muted);
+}
+
+.keyword-row {
+  display: grid;
+  grid-template-columns: minmax(0, 240px) 1fr;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.keyword-label {
+  font-size: 13px;
+  color: var(--fg-muted);
+}
+
+.keyword-input {
+  width: 100%;
+}
+
+.keyword-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  flex-wrap: wrap;
+}
+
+.keyword-msg {
+  font-size: 13px;
+  color: var(--fg-muted);
+}
+
+.keyword-msg.ok {
+  color: var(--ok);
+}
+
+/* ── 다음 단계 퍼널 ── */
+.result-funnel {
+  margin-top: 18px;
+  padding: 18px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-l);
+  background: var(--surface);
+}
+
+.result-funnel-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 10px 0 14px;
+}
+
+.result-funnel-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-m);
+  background: var(--surface-2);
+}
+
+.result-funnel-qno {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.result-funnel-meta {
+  font-size: 13px;
+  color: var(--fg-muted);
+  margin-right: auto;
+}
+
+.result-funnel-item .btn {
+  min-height: 32px;
+  padding: 5px 10px;
+  font-size: 13px;
+}
+
+.result-full-btn {
+  margin-top: 4px;
+}
+
+/* ==========================================================================
+   문항 챗 (components/chat.js)
+   ========================================================================== */
+.chat {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.chat-note {
+  margin: 0;
+  font-size: 13px;
+  color: var(--fg-muted);
+}
+
+/* 대화 로그 우물 */
+.chat-log {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 120px;
+  max-height: 46vh;
+  overflow: auto;
+  padding: 12px;
+  border-radius: var(--radius-m);
+  background: var(--surface-2);
+}
+
+/* 말풍선 */
+.chat-msg {
+  max-width: 85%;
+  padding: 8px 12px;
+  border-radius: var(--radius-m);
+  font-size: 14px;
+  line-height: 1.5;
+  word-break: break-word;
+}
+
+.chat-msg-text {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.chat-msg.user {
+  align-self: flex-end;
+  background: var(--accent);
+  color: var(--accent-fg-on);
+  border-bottom-right-radius: 4px;
+}
+
+.chat-msg.assistant {
+  align-self: flex-start;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-bottom-left-radius: 4px;
+}
+
+.chat-msg.error {
+  align-self: flex-start;
+  background: var(--danger-soft);
+  color: var(--danger);
+  border: 1px solid var(--danger);
+}
+
+/* 스트리밍 커서(▍ 깜빡임) */
+.chat-cursor {
+  display: inline-block;
+  margin-left: 1px;
+  color: var(--fg-muted);
+  animation: chat-cursor-blink 1s step-end infinite;
+}
+
+@keyframes chat-cursor-blink {
+  50% { opacity: 0; }
+}
+
+/* 사후 감사 경고 스트립 */
+.chat-audit-warn {
+  align-self: stretch;
+  padding: 7px 10px;
+  border-radius: var(--radius-s);
+  background: var(--warn-soft);
+  color: var(--warn);
+  font-size: 13px;
+}
+
+/* 입력 행 */
+.chat-input-row {
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+}
+
+.chat-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  border-radius: var(--radius-m);
+}
+
+.chat-tools {
+  display: flex;
+  gap: 8px;
+}
+
+/* 승인(기록) 카드 */
+.chat-approve {
+  margin-top: 10px;
+  padding: 14px 16px;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-m);
+  background: var(--accent-soft);
+}
+
+.chat-approve-title {
+  margin: 0 0 10px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.chat-chk {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 6px 0;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.chat-approve-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  flex-wrap: wrap;
+}
+
+.chat-approve-status {
+  font-size: 13px;
+  color: var(--fg-muted);
+}
+
+/* ==========================================================================
+   개념 보기 (components/concept.js)
+   ========================================================================== */
+.concept-title {
+  margin: 0 0 12px;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.concept-section-title {
+  margin: 14px 0 8px;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: .03em;
+  color: var(--fg-muted);
+}
+
+.concept-loading,
+.concept-empty {
+  color: var(--fg-muted);
+  font-size: 14px;
+}
+
+/* 노트 / 해설 카드 */
+.concept-note,
+.concept-solution {
+  padding: 12px 14px;
+  margin: 8px 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-m);
+  background: var(--surface);
+}
+
+/* 내 노트 — 좌측 3px accent 바 */
+.concept-note.mine {
+  border-left: 3px solid var(--accent);
+}
+
+.concept-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  margin-bottom: 8px;
+  font-size: 12.5px;
+  color: var(--fg-muted);
+}
+
+.concept-nick {
+  font-weight: 600;
+  color: var(--fg);
+}
+
+/* ==========================================================================
+   md 본문 타이포 (.md-body — 개념/해설 렌더)
+   ========================================================================== */
+.md-body {
+  font-size: 14px;
+}
+
+.md-body > *:first-child { margin-top: 0; }
+.md-body > *:last-child  { margin-bottom: 0; }
+
+.md-body h1 { font-size: 18px; }
+.md-body h2 { font-size: 16px; }
+.md-body h3 { font-size: 15px; }
+.md-body h4 { font-size: 14px; }
+
+.md-body h1,
+.md-body h2,
+.md-body h3,
+.md-body h4 {
+  margin: 14px 0 6px;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.md-body p,
+.md-body ul,
+.md-body ol {
+  margin: 8px 0;
+}
+
+.md-body li {
+  margin: 3px 0;
+}
+
+.md-body code {
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+  padding: 1px 5px;
+  border-radius: 6px;
+  background: var(--surface-2);
+}
+
+.md-body pre,
+.concept-md {
+  margin: 8px 0;
+  padding: 12px;
+  border-radius: var(--radius-m);
+  background: var(--surface-2);
+  overflow: auto;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.md-body pre code {
+  padding: 0;
+  background: none;
+}
+
+.md-body table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 8px 0;
+  font-size: 13px;
+}
+
+.md-body th,
+.md-body td {
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  text-align: left;
+}
+
+.md-body th {
+  background: var(--surface-2);
+  font-weight: 600;
+}
+
+.md-body blockquote {
+  margin: 8px 0;
+  padding: 4px 12px;
+  border-left: 3px solid var(--border-strong);
+  color: var(--fg-muted);
+}
+
+.md-body a {
+  color: var(--accent);
+  text-decoration: underline;
+}
+
+/* ==========================================================================
+   반응형 — 화면별
+   ========================================================================== */
+
+/* 대시보드 스탯: 모바일 2열 */
+@media (max-width: 720px) {
+  .dash-stat-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+/* 풀이: 1000px 미만 — 뷰어/레일 세로 스택, 레일 sticky 해제 */
+@media (max-width: 1000px) {
+  .solve-body {
+    flex-direction: column;
+  }
+
+  .omr-rail {
+    position: static;
+    flex-basis: auto;
+    max-width: 100%;
+    width: 100%;
+    max-height: none;
+  }
+}
+
+/* 좁은 화면 여백·그리드 축소 */
+@media (max-width: 640px) {
+  .keyword-row {
+    grid-template-columns: 1fr;
+  }
+
+  .result-gauge-row {
+    grid-template-columns: minmax(60px, 100px) 1fr auto;
+  }
+
+  .result-hero-conf {
+    margin-left: 0;
+  }
+}

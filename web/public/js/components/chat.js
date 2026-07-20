@@ -10,17 +10,20 @@ import { apiFetch, getState } from '../store.js';
 // 대화 이력(멀티턴 재주입용). [{ role:'user'|'assistant', text }]
 export function renderChat(container, ctx) {
   const { cli } = getState();
+  // cli.chat/cli.record 는 { command, available } 객체 — available 로 가용성 판단.
+  const chatOk = !!(cli.chat && cli.chat.available);
+  const recordOk = !!(cli.record && cli.record.available);
   container.innerHTML = '';
 
   const wrap = document.createElement('section');
   wrap.className = 'chat';
 
-  if (!cli.record || !cli.chat) {
+  if (!recordOk || !chatOk) {
     const note = document.createElement('p');
     note.className = 'chat-note';
     const 없음 = [];
-    if (!cli.chat) 없음.push('agy(챗)');
-    if (!cli.record) 없음.push('claude(기록)');
+    if (!chatOk) 없음.push('agy(챗)');
+    if (!recordOk) 없음.push('claude(기록)');
     note.textContent = `${없음.join(', ')} 미설치 — 해당 AI 기능은 비활성입니다. 풀이·채점·기록 열람은 정상 동작합니다.`;
     wrap.appendChild(note);
   }
@@ -33,12 +36,12 @@ export function renderChat(container, ctx) {
   const 입력 = document.createElement('textarea');
   입력.className = 'chat-input';
   입력.rows = 2;
-  입력.placeholder = cli.chat ? '이 문항에 대해 질문하세요…' : 'agy 미설치 — 챗 비활성';
-  입력.disabled = !cli.chat;
+  입력.placeholder = chatOk ? '이 문항에 대해 질문하세요…' : 'agy 미설치 — 챗 비활성';
+  입력.disabled = !chatOk;
   const 보내기 = document.createElement('button');
   보내기.className = 'btn';
   보내기.textContent = '질문';
-  보내기.disabled = !cli.chat;
+  보내기.disabled = !chatOk;
   입력행.append(입력, 보내기);
 
   const 도구행 = document.createElement('div');

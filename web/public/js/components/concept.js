@@ -1,8 +1,6 @@
 // 문제 개념 및 풀이 보기: 🔁 태그로 연결된 내/타인 노트 섹션 + 공유 해설을 렌더한다.
 // 서버(GET /api/concept/:examId/:qno)가 marked로 렌더한 본문html을 제공한다.
 
-import { apiFetch } from '../store.js';
-
 // 현재 열려 있는 개념 패널 컨텍스트(파일 변경 시 자동 새로고침용).
 let current = null; // { container, examId, qno }
 
@@ -77,7 +75,8 @@ export async function renderConcept(container, examId, qno) {
   container.append(el('p', 'concept-loading', '개념·풀이를 불러오는 중…'));
   try {
     const url = `/api/concept/${encodeURIComponent(examId)}/${encodeURIComponent(qno)}`;
-    const res = await apiFetch(url);
+    // 읽기(GET)는 다른 조회 경로와 일관되게 plain fetch 사용(토큰 불필요).
+    const res = await fetch(url);
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || '개념 보기를 불러오지 못했습니다.');
     // 응답 도착 시 다른 문항으로 이동했으면 무시.

@@ -58,8 +58,17 @@ async function fetchParticipants() {
   }
 }
 
+// 현재 등록된 문서 클릭 리스너(메뉴 바깥 클릭 닫기). 재렌더로 메뉴 DOM만 사라지고
+// closeMenu 가 호출되지 않은 경우 리스너가 남는 누수를 막기 위해 모듈 레벨로 추적한다.
+let activeOnOutside = null;
+
 export function renderNicknameMenu(container) {
   if (!container) return;
+  // 이전 렌더가 남긴 문서 클릭 리스너 제거(재렌더로 메뉴 DOM만 사라진 경우 대비).
+  if (activeOnOutside) {
+    document.removeEventListener('click', activeOnOutside, true);
+    activeOnOutside = null;
+  }
   const { nickname } = getState();
   container.innerHTML = '';
   if (!nickname) return; // 미설정 → 헤더 비움(온보딩 화면이 담당)
@@ -82,6 +91,7 @@ export function renderNicknameMenu(container) {
     releaseTrap = null;
     chip.setAttribute('aria-expanded', 'false');
     document.removeEventListener('click', onOutside, true);
+    if (activeOnOutside === onOutside) activeOnOutside = null;
   }
 
   function onOutside(e) {
@@ -113,6 +123,7 @@ export function renderNicknameMenu(container) {
     wrap.append(menu);
     chip.setAttribute('aria-expanded', 'true');
     releaseTrap = trapFocus(menu, closeMenu);
+    activeOnOutside = onOutside;
     setTimeout(() => document.addEventListener('click', onOutside, true), 0);
     change.focus();
   }
