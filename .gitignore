@@ -1,0 +1,16 @@
+# Q-Net 기출 풀이 웹 앱 로컬 상태 (재생성 가능 — md/git이 유일한 진실 원천)
+.qnet-web/
+
+# OMC 운영 아티팩트 (세션 상태·계획·핸드오프 — 재생성 가능)
+.omc/
+
+# Playwright 브라우저 검증 잔재
+.playwright-mcp/
+
+# Node 의존성
+node_modules/
+web/node_modules/
+
+# 로그·OS 잡파일
+*.log
+.DS_Store
