@@ -1,7 +1,19 @@
 # 📚 Q-Net Study
 
-> Q-Net(큐넷) 자격증 기출을 **브라우저에서 풀고, 자동 채점·기록하고, 오답을 관리**하는 로컬 웹 앱 + 스터디 저장소입니다.
-> 서버는 내 컴퓨터에서만 돌고(127.0.0.1 전용), 모든 기록은 마크다운 파일로 남아 git으로 스터디원과 공유합니다.
+**Q-Net(큐넷) 국가기술자격 시험공부 올인원 스터디 저장소** — 정보처리기사·산업안전기사·전기기사 등 어떤 종목이든, 기출문제 PDF를 **브라우저에서 풀고 · 자동 채점하고 · 오답을 복습**합니다.
+
+[![License: CC BY-NC 4.0](https://img.shields.io/badge/license-CC_BY--NC_4.0-lightgrey)](LICENSE)
+[![Node.js 18+](https://img.shields.io/badge/Node.js-18%2B-339933?logo=nodedotjs&logoColor=white)](https://nodejs.org/ko)
+[![Local-first](https://img.shields.io/badge/local--first-127.0.0.1_only-1f6feb)](web/README.md)
+[![Claude Code](https://img.shields.io/badge/Claude_Code-AI_%EC%97%B0%EB%8F%99_(%EC%84%A0%ED%83%9D)-d97757)](https://claude.com/claude-code)
+
+> 서버는 내 컴퓨터에서만 돕니다(127.0.0.1 전용). DB 없이 **모든 기록이 사람이 읽는 마크다운 파일**로 남아, git 하나로 스터디원과 공유됩니다.
+
+| 📄 기출 풀이 | ✅ 자동 채점 | 🔁 오답 복습 | 🤝 스터디 공유 | 🤖 AI 연동(선택) |
+|:---:|:---:|:---:|:---:|:---:|
+| PDF 뷰어 + OMR<br>키보드 입력·자동 임시저장 | 과목 점수·과락<br>합격 판정·점수 추이 | 확신도 기반<br>복습 우선순위 인덱스 | 기록 전부 마크다운<br>`git push`면 끝 | 정답 자동 추출<br>노트 정리·AI 챗 |
+
+**바로가기** — [🚀 빠른 시작](#-빠른-시작-3분) · [🖥️ 웹 기능](#-웹에서-할-수-있는-것) · [📂 기록 구조](#-내-기록은-어디에-남나) · [🤝 스터디 공유](#-스터디원과-공유하기) · [🔧 문제 해결](#-문제가-생기면) · [🧠 Claude Code 스킬](#-deep-사용자용--claude-code와-직접-쓰기) · [📜 라이센스](#-라이센스)
 
 ## 🚀 빠른 시작 (3분)
 
@@ -121,6 +133,14 @@ DB가 없습니다. **모든 기록이 사람이 읽을 수 있는 마크다운 
 - **공유 해설**(`_공통/풀이/`): 한 파일에 여러 명이 기여하되 각자 `## 닉네임 (날짜)` 서명 섹션에만 append. 남의 섹션은 불가침
 - **커밋 메시지**: `[자격증/닉네임] 요약` (공통 자료는 `[자격증/공통] 요약`)
 - 전체 규칙은 **[CLAUDE.md](CLAUDE.md)** (Claude가 따르는 규칙이지만 사람이 읽어도 유용), 양식은 **[templates/](templates/)**, Q-Net 자격 체계 조사는 **[docs/qnet-guide.md](docs/qnet-guide.md)** 참조
+
+---
+
+## ⭐ 이 프로젝트가 마음에 든다면
+
+- **Star**를 눌러주세요 — 검색 노출이 올라가 더 많은 수험생에게 닿습니다.
+- **Fork**해서 여러분의 스터디 저장소로 쓰는 것도 환영합니다 (출처 표기 필수 · 비영리 — 아래 라이센스 참조).
+- 개선 아이디어·버그는 [Issues](https://github.com/hun-meta/Q-Net-Study/issues)로 남겨주세요.
 
 ## 📜 라이센스
 
