@@ -271,6 +271,7 @@ export async function renderOmr(container, ctx) {
 }
 
 // view(답 포함 열람) 모드 정답표(읽기 전용). 서버 GET /api/exams/:id/answers.
+// ctx: { grade, cert, id, onConcept?(qno), onChat?(qno) } — 콜백을 주면 문항별 개념/챗 버튼 표시.
 export async function renderAnswerTable(container, ctx) {
   const { grade, cert, id } = ctx;
   container.innerHTML = '<p class="loading" style="padding:16px">정답표 불러오는 중…</p>';
@@ -301,6 +302,23 @@ export async function renderAnswerTable(container, ctx) {
       const ans = el('span', 'omr-answer-label');
       ans.append(document.createTextNode('정답 '), el('span', 'omr-answer-glyph', key ? OPTIONS[key - 1] : '—'));
       row.append(ans);
+
+      // 열람 모드에서도 문항별 개념/챗 진입(시험치기와 동일 버튼).
+      const tools = el('div', 'omr-tools');
+      for (const kind of ['concept', 'chat']) {
+        const cb = kind === 'concept' ? ctx.onConcept : ctx.onChat;
+        if (typeof cb !== 'function') continue;
+        const qno = n;
+        const b = el('button', 'omr-tool-btn');
+        b.type = 'button';
+        b.innerHTML = kind === 'concept' ? ICON_CONCEPT : ICON_CHAT;
+        b.title = kind === 'concept' ? '개념 보기' : '문항 챗';
+        b.setAttribute('aria-label', `${qno}번 ${kind === 'concept' ? '개념 보기' : '챗'}`);
+        b.addEventListener('click', () => cb(qno));
+        tools.append(b);
+      }
+      if (tools.childNodes.length) row.append(tools);
+
       container.append(row);
     }
   }

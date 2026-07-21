@@ -342,7 +342,13 @@ export async function mount(container, { grade, cert, examId, mode }) {
     headTop.append(title, el('div', 'sv-omr-sub', ''));
     omrHead.append(headTop);
 
-    const res = await renderAnswerTable(omrBody, { grade, cert, id: examId });
+    const res = await renderAnswerTable(omrBody, {
+      grade,
+      cert,
+      id: examId,
+      onConcept: openConcept,
+      onChat: openChat,
+    });
     if (active !== self) return;
     headTop.querySelector('.sv-omr-sub').textContent = res.등록 ? `전체 ${res.문항수}문항` : '';
 

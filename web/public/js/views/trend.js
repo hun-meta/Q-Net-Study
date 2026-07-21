@@ -95,7 +95,12 @@ export async function mount(container, { grade, cert, examId }) {
     const chartHead = el('div', 'tr-chart-head');
     chartHead.append(el('div', 'tr-chart-title', '시도별 추이'));
     const legend = el('div', 'tr-legend');
-    legend.append(legendItem('점수', 'var(--accent)'), legendItem('확신 정답률', 'var(--success)'), legendItem('합격선 60', 'dash'));
+    legend.append(
+      legendItem('점수', 'var(--accent)'),
+      legendItem('확신 정답률', 'var(--success)'),
+      legendItem('오답 수', 'var(--danger)'),
+      legendItem('합격선 60', 'dash')
+    );
     chartHead.append(legend);
     chartCard.append(chartHead);
 
@@ -107,6 +112,7 @@ export async function mount(container, { grade, cert, examId }) {
         passLine: 60,
         xLabels: attempts.map((a) => `시도 ${a.시도}`),
         series: [
+          { values: attempts.map((a) => (a.X수 == null ? 0 : Number(a.X수))), color: 'var(--danger)', r: 3.5 },
           { values: attempts.map((a) => (a.확신정답률 == null ? 0 : a.확신정답률)), color: 'var(--success)', r: 4 },
           { values: attempts.map((a) => Number(a.총점) || 0), color: 'var(--accent)', r: 4.5, labels: true },
         ],
