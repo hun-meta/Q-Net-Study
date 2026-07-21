@@ -82,3 +82,51 @@ test('getSubsetPath — 원본 변경(mtime) 시 캐시 무효화', async () => 
   assert.notStrictEqual(before1.path, after1.path); // 다른 캐시 키
   assert.strictEqual(await pdfSubset.pageCount(after1.path), 2);
 });
+
+// ── 암호화 PDF (회귀: 시중 기출 PDF 는 소유자-암호로 잠긴 경우가 많다) ────────
+// 순정 pdf-lib 의 ignoreEncryption 복사는 내용 스트림을 암호문 그대로 남겨
+// pdf.js 렌더가 "에러 없는 백지"가 됐다. 복호화 로드 후 서브셋은 실제로 그려져야 한다.
+
+const { PDFDocument: CantooPDF } = require('@cantoo/pdf-lib');
+
+// 내용(사각형)이 그려진 N페이지 PDF 를 만들고 소유자-암호로 잠근다(사용자 암호는 빈 값).
+async function makeEncryptedPdf(n, opts) {
+  const doc = await CantooPDF.create();
+  for (let i = 0; i < n; i += 1) {
+    const p = doc.addPage([200, 200]);
+    p.drawRectangle({ x: 20, y: 20, width: 120, height: 80 });
+  }
+  await doc.encrypt({
+    ownerPassword: 'owner-secret',
+    userPassword: (opts && opts.userPassword) || undefined,
+    permissions: { printing: 'highResolution' },
+  });
+  return Buffer.from(await doc.save());
+}
+
+// pdf.js(legacy)로 1페이지의 렌더 오퍼레이터 수를 센다(0 = 백지).
+async function opCountOfPage1(bytes) {
+  const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
+  const doc = await pdfjs.getDocument({ data: new Uint8Array(bytes) }).promise;
+  const page = await doc.getPage(1);
+  const ops = await page.getOperatorList();
+  await doc.destroy();
+  return ops.fnArray.length;
+}
+
+test('buildSubset — 소유자-암호 PDF 를 복호화해 내용이 살아있는 서브셋 생성', async () => {
+  const enc = await makeEncryptedPdf(3);
+  const 서브셋 = await pdfSubset.buildSubset(enc, 1);
+  assert.strictEqual(await pdfSubset.pageCount(서브셋), 2);
+  // 핵심 회귀: pdf.js 가 실제로 그릴 내용이 있어야 한다(예전 버그: 0 = 백지).
+  const ops = await opCountOfPage1(서브셋);
+  assert.ok(ops > 0, `서브셋 1페이지 렌더 오퍼레이터가 비어 있음(백지) — ops=${ops}`);
+});
+
+test('buildSubset — 사용자-암호 PDF 는 EPDFPASSWORD 로 명확히 실패', async () => {
+  const enc = await makeEncryptedPdf(2, { userPassword: 'user-pw' });
+  await assert.rejects(
+    () => pdfSubset.buildSubset(enc, 1),
+    (e) => e.code === 'EPDFPASSWORD'
+  );
+});

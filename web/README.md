@@ -79,6 +79,7 @@ npm start          # 127.0.0.1:4525 기본, 점유 시 4526~4535 탐색
 ## 아키텍처 메모
 
 - 서버: Express + chokidar 워처 + SSE. 프론트: 무빌드 바닐라 ES 모듈(pdf.js).
-- CLI 브리지(`server/cliBridge.js`)는 `execFile`/`spawn` 인자 배열만 사용(셸 보간 없음), 잡 큐 동시 1, Node 타이머 kill 타임아웃(추출 5분/정리 2분/챗 3분). macOS에 `timeout` 명령이 없어 쉘 timeout에 의존하지 않습니다.
+- CLI 브리지(`server/cliBridge.js`)는 `execFile`/`spawn` 인자 배열만 사용(셸 보간 없음), 잡 큐 동시 1, Node 타이머 kill 타임아웃(추출 5분/정리 2분/챗 3분/마이크로월드 5분). macOS에 `timeout` 명령이 없어 쉘 timeout에 의존하지 않습니다.
+- **전역 직렬화(감사 오인 방지)**: 잡 큐는 모듈 전역 공유 1개이며, 저장소 영역을 쓰는 모든 서버 결정적 쓰기(PDF 배치 `prepare`·INDEX 부기·수동 정답·풀이 제출/키워드·자격증 골격·참여자.md)는 `cliBridge.serialize()`로 같은 큐에 태워 CLI 잡 실행 창과 절대 겹치지 않게 합니다. 겹치면 잡의 사후 감사가 그 쓰기를 "경계 밖 무단 변경"으로 오인해 잡 전체 원복 + 파일 삭제가 일어납니다(동시 업로드로 실측 재현·회귀 테스트 `serializeRace.test.js`). `.qnet-web/`(드래프트·캐시·config)은 감사 제외라 직렬화 불필요.
 - 마이크로월드: `server/microworldRoutes.js`(목록·열람·생성) + `cliBridge.microworld`(claude 잡, 목적지 `_공통/마이크로월드/` 사후 감사) + 프론트 `components/microworld.js`(샌드박스 iframe 임베드). 코드 이해용 마이크로월드는 스킬 `/microworld`로 `.omc/`에 별도 생성.
 - 규칙 문서: 저장소 루트 [`CLAUDE.md`](../CLAUDE.md), 스킬 `/exam-pdf`·`/study-note`·`/attempt-log`·`/explain-diff`·`/microworld`.

@@ -9,18 +9,44 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
-const { PDFDocument } = require('pdf-lib');
+// @cantoo/pdf-lib: pdf-lib 포크(MIT) — 암호화 PDF 복호화(load password) 지원.
+// 시중 기출 PDF는 소유자-암호(사용자 암호는 빈 문자열)로 잠긴 경우가 많은데,
+// 순정 pdf-lib 의 ignoreEncryption 은 "복호화"가 아니라 "에러 무시"라서
+// 복사된 내용 스트림이 암호문 그대로 남아 pdf.js 렌더가 백지가 된다.
+const { PDFDocument } = require('@cantoo/pdf-lib');
 const config = require('./config');
 
 // 서브셋 캐시 위치(.qnet-web/cache/pdf-subset) — 재생성 가능, gitignore 대상.
 const CACHE_DIR = path.join(config.STATE_DIR, 'cache', 'pdf-subset');
+
+// 캐시 키 버전 — 서브셋 생성 로직이 바뀌면 올려서 기존(깨진) 캐시를 무효화한다.
+// v2: 암호화 PDF 복호화 로드 도입(백지 서브셋 버그 수정).
+const CACHE_VERSION = 'v2';
+
+// PDF 로드: 비암호화 → 그대로, 암호화 → 빈 사용자 비밀번호로 복호화 시도.
+// 진짜 사용자 비밀번호가 걸린 문서면 EPDFPASSWORD 를 던진다(백지 서브셋을 만드느니 명확히 실패).
+async function loadPdfDecrypted(bytes) {
+  try {
+    return await PDFDocument.load(bytes);
+  } catch (_e) {
+    try {
+      return await PDFDocument.load(bytes, { password: '' });
+    } catch (_e2) {
+      const err = new Error(
+        '비밀번호가 걸린 PDF 입니다. 비밀번호를 해제한 PDF 로 다시 등록해 주세요.'
+      );
+      err.code = 'EPDFPASSWORD';
+      throw err;
+    }
+  }
+}
 
 // 원본 PDF 바이트에서 마지막 hiddenCount 페이지를 제거한 서브셋 바이트(Buffer)를 만든다.
 async function buildSubset(srcBytesOrPath, hiddenCount) {
   const bytes = Buffer.isBuffer(srcBytesOrPath)
     ? srcBytesOrPath
     : fs.readFileSync(srcBytesOrPath);
-  const src = await PDFDocument.load(bytes, { ignoreEncryption: true });
+  const src = await loadPdfDecrypted(bytes);
   const total = src.getPageCount();
   const hidden = Math.max(0, Math.min(total, Number(hiddenCount) || 0));
   const keep = total - hidden;
@@ -37,11 +63,17 @@ async function buildSubset(srcBytesOrPath, hiddenCount) {
 }
 
 // 원본 PDF의 총 페이지 수를 반환(추출 검증·숨김페이지수 도메인 확인용).
+// 구조(페이지 트리)만 읽으므로 복호화 실패 시 ignoreEncryption 으로도 충분하다.
 async function pageCount(srcBytesOrPath) {
   const bytes = Buffer.isBuffer(srcBytesOrPath)
     ? srcBytesOrPath
     : fs.readFileSync(srcBytesOrPath);
-  const src = await PDFDocument.load(bytes, { ignoreEncryption: true });
+  let src;
+  try {
+    src = await loadPdfDecrypted(bytes);
+  } catch (_e) {
+    src = await PDFDocument.load(bytes, { ignoreEncryption: true });
+  }
   return src.getPageCount();
 }
 
@@ -56,7 +88,7 @@ async function getSubsetPath(srcPath, hiddenCount, cacheDir = CACHE_DIR) {
   }
   const key = crypto
     .createHash('sha1')
-    .update(`${path.resolve(srcPath)}|${stat.mtimeMs}|${hidden}`)
+    .update(`${CACHE_VERSION}|${path.resolve(srcPath)}|${stat.mtimeMs}|${hidden}`)
     .digest('hex');
   const cachePath = path.join(cacheDir, `${key}.pdf`);
   if (fs.existsSync(cachePath)) {
@@ -71,4 +103,4 @@ async function getSubsetPath(srcPath, hiddenCount, cacheDir = CACHE_DIR) {
   return { path: cachePath, cached: false, original: false };
 }
 
-module.exports = { CACHE_DIR, buildSubset, pageCount, getSubsetPath };
+module.exports = { CACHE_DIR, CACHE_VERSION, buildSubset, pageCount, getSubsetPath, loadPdfDecrypted };

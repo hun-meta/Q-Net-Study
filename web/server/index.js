@@ -18,14 +18,43 @@ function binaryOf(command) {
 
 // execFile(bin, ["--version"]) 로 CLI 설치 여부 감지. macOS에 `timeout` 명령이
 // 없으므로 execFile의 timeout 옵션(Node 내장 타이머)로 무한 대기를 방지한다.
+// 타임아웃 10초: 기동 순간 시스템이 바쁘면 3초로는 설치된 CLI도 놓친다(오탐 → "미설치" 고착).
 function detectCli(command) {
   return new Promise((resolve) => {
     const bin = binaryOf(command);
     if (!bin) return resolve(false);
-    execFile(bin, ['--version'], { timeout: 3000 }, (err) => {
+    execFile(bin, ['--version'], { timeout: 10000 }, (err) => {
       resolve(!err);
     });
   });
+}
+
+// 기동 시 미감지된 CLI 를 주기 재검사한다. 감지되면 cli 객체를 제자리 갱신하고
+// (라우트·브리지는 참조 공유라 즉시 반영) SSE 'cli-change' 로 프론트에 알린다.
+// 둘 다 감지되면 폴링을 멈춘다. — 일시 부하로 인한 오탐이 재기동 없이 자가 회복되게.
+const REDETECT_INTERVAL_MS = 30000;
+function startCliRedetect(cli, cfg, hub) {
+  if (cli.chat && cli.record) return null;
+  const timer = setInterval(async () => {
+    let changed = false;
+    if (!cli.chat && (await detectCli(cfg.cliChat))) {
+      cli.chat = true;
+      changed = true;
+    }
+    if (!cli.record && (await detectCli(cfg.cliRecord))) {
+      cli.record = true;
+      changed = true;
+    }
+    if (changed) {
+      process.stdout.write(
+        `[cli] 재검사로 감지됨 — agy(챗): ${cli.chat ? '✅' : '⚠️'} / claude(기록): ${cli.record ? '✅' : '⚠️'}\n`
+      );
+      hub.broadcast('cli-change', { chat: cli.chat, record: cli.record });
+    }
+    if (cli.chat && cli.record) clearInterval(timer);
+  }, REDETECT_INTERVAL_MS);
+  timer.unref();
+  return timer;
 }
 
 function makeToken() {
@@ -69,8 +98,11 @@ async function start() {
   const server = app.listen(port, '127.0.0.1', () => {
     // 파일 워처 시작(로컬 상태·git·node_modules 무시).
     const watcher = startWatcher(config.REPO_ROOT, hub);
+    // 미감지 CLI 자가 회복 폴링(감지 완료 시 자동 종료).
+    const redetect = startCliRedetect(cli, cfg, hub);
     server.on('close', () => {
       watcher.close();
+      if (redetect) clearInterval(redetect);
     });
 
     banner([
@@ -99,4 +131,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { start, detectCli, binaryOf };
+module.exports = { start, detectCli, binaryOf, startCliRedetect };

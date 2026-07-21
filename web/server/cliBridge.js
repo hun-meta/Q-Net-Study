@@ -136,6 +136,20 @@ function createQueue() {
   };
 }
 
+// ── 모듈 전역 공유 큐 ────────────────────────────────────────────────────────
+// 모든 CLI 잡(추출·정리·챗·마이크로월드) + 저장소 영역 서버 결정적 쓰기를 하나로 직렬화한다.
+// 큐가 나뉘면(라우터별 createBridge 각자 큐, 서버 쓰기는 요청 즉시 실행) 실행 중인 잡의
+// 사후 감사가 다른 경로의 변경을 "경계 밖 무단 변경"으로 오인해 잡 전체 원복이 일어난다
+// (동시 업로드 레이스로 실측 재현 — 정답 파일·PDF 가 삭제됐다).
+const sharedEnqueue = createQueue();
+
+// 저장소 영역을 쓰는 서버 임계구역을 CLI 잡과 직렬화해 실행한다(라우트 레벨 전용).
+// 주의: CLI 잡 함수 "내부"에서 호출하면 자기 자신을 기다리는 교착이 된다 — 잡 안에서는 금지.
+// .qnet-web/(드래프트·캐시·config)처럼 감사 제외 영역만 쓰는 코드는 감쌀 필요 없다.
+function serialize(fn) {
+  return sharedEnqueue(fn);
+}
+
 // ── 프롬프트 빌더 ─────────────────────────────────────────────────────────
 
 // 프롬프트 인젝션 완화 가드(정리·추출 공통, --append-system-prompt 로 주입).
@@ -267,7 +281,8 @@ function createBridge(deps) {
   const repoRoot = d.repoRoot;
   const cli = d.cli || { chat: false, record: false };
   const audit = d.audit || require('./audit');
-  const enqueue = createQueue();
+  // 브리지 인스턴스가 여러 개여도(cliRoutes·microworldRoutes) 잡은 전역 큐 하나로 직렬화.
+  const enqueue = sharedEnqueue;
 
   const chatCmd = () => parseCommand(config.cliChat);
   const recordCmd = () => parseCommand(config.cliRecord);
@@ -348,6 +363,10 @@ function createBridge(deps) {
   }
 
   // 정답 추출(claude 직접 쓰기): 정답 md 작성. 잡 후 정답 디렉토리 감사.
+  // params.prepare?: 잡 차례가 왔을 때(스냅샷 직전) 실행되는 서버 결정적 쓰기 훅.
+  //   PDF 배치 등을 요청 시점에 바로 쓰면, 실행 중인 다른 잡의 감사가 그 파일을
+  //   "경계 밖 변경"으로 오인해 잡 전체 원복 + 파일 삭제가 일어난다(동시 업로드 레이스).
+  //   큐 안에서 쓰면 잡들과 직렬화되어 스냅샷에 선반영된다.
   function extract(params) {
     return enqueue(async () => {
       if (!cli.record) {
@@ -355,6 +374,7 @@ function createBridge(deps) {
         err.code = 'ECLIUNAVAILABLE';
         throw err;
       }
+      if (typeof params.prepare === 'function') await params.prepare();
       const { file, baseArgs } = recordCmd();
       const prompt = buildExtractPrompt(params);
       const snap = audit.snapshot({
@@ -437,6 +457,7 @@ function createBridge(deps) {
 
 module.exports = {
   createBridge,
+  serialize,
   parseCommand,
   runProcess,
   parseClaudeStreamJson,

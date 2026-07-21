@@ -32,6 +32,7 @@ const repo = require('./repo');
 const nickname = require('./nickname');
 const participants = require('./participants');
 const config = require('./config');
+const { serialize } = require('./cliBridge'); // 저장소 쓰기를 CLI 잡과 직렬화(감사 오인 방지)
 
 const PUBLIC_DIR = path.join(__dirname, '..', 'public');
 
@@ -225,10 +226,11 @@ function createApp(deps) {
   });
 
   // 닉네임 설정(검증 + config 저장 + 참여자.md upsert). 비-GET → 토큰 필수.
-  app.post('/api/nickname', (req, res) => {
+  app.post('/api/nickname', async (req, res) => {
     try {
       const saved = nickname.setNickname(req.body && req.body.nickname);
-      participants.upsert(repoRoot, saved);
+      // 참여자.md(저장소 영역) 쓰기는 CLI 잡 큐와 직렬화(감사 오인 원복 방지).
+      await serialize(async () => participants.upsert(repoRoot, saved));
       hub.broadcast('participants-change', { nickname: saved, action: 'upsert' });
       res.json({ nickname: saved, participants: participants.listAll(repoRoot) });
     } catch (err) {
@@ -244,7 +246,7 @@ function createApp(deps) {
 
   // 닉네임 삭제: confirm 이 닉네임과 정확히 일치해야 실행.
   // 참여자.md 제거 + 모든 자격증의 개인 디렉토리 + 드래프트 재귀 삭제(경계 검증).
-  app.delete('/api/nickname', (req, res) => {
+  app.delete('/api/nickname', async (req, res) => {
     const body = req.body || {};
     const nick = repo.nfc(body.nickname == null ? '' : body.nickname);
     if (!nick) return res.status(400).json({ error: '삭제할 닉네임이 필요합니다.' });
@@ -252,8 +254,12 @@ function createApp(deps) {
       return res.status(400).json({ error: '확인 문자열이 닉네임과 일치하지 않습니다.' });
     }
     try {
-      const result = deleteParticipant(repoRoot, nick);
-      participants.remove(repoRoot, nick);
+      // 개인 디렉토리 삭제 + 참여자.md 갱신은 CLI 잡 큐와 직렬화(감사 오인 원복 방지).
+      let result;
+      await serialize(async () => {
+        result = deleteParticipant(repoRoot, nick);
+        participants.remove(repoRoot, nick);
+      });
       // 현재 config 닉네임을 삭제하면 해제.
       const current = config.loadConfig();
       if (current.nickname === nick) config.saveConfig({ ...current, nickname: null });
@@ -266,7 +272,7 @@ function createApp(deps) {
   });
 
   // 자격증 생성: {종류}/{자격증}/_공통 골격 생성. 이미 존재하면 409.
-  app.post('/api/certs', (req, res) => {
+  app.post('/api/certs', async (req, res) => {
     const body = req.body || {};
     let field;
     let cert;
@@ -277,7 +283,11 @@ function createApp(deps) {
       return res.status(400).json({ error: err.message });
     }
     try {
-      const created = scaffoldCert(repoRoot, field, cert);
+      // _공통 골격 생성(저장소 쓰기)도 CLI 잡 큐와 직렬화(감사 오인 원복 방지).
+      let created;
+      await serialize(async () => {
+        created = scaffoldCert(repoRoot, field, cert);
+      });
       hub.broadcast('fs-change', {
         changes: [{ path: created.relPath, type: 'addDir' }],
         at: Date.now(),

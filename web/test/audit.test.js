@@ -39,6 +39,29 @@ test('클린 잡: 목적지 내부 신규/수정은 유지되고 clean=true', ()
   assert.ok(fs.existsSync(path.join(root, 'notes/신규.md')));
 });
 
+test('.omc 제외: 잡 서브프로세스가 .omc/ 에 상태를 써도 경계 위반이 아니고 목적지 산출물 유지', () => {
+  // 회귀: 추출 claude 서브프로세스가 전역 OMC 로드로 .omc/state 등에 상태를 쓰면
+  // 예전엔 "목적지 밖 변경"으로 오인돼 정답 파일까지 잡 전체 원복됐다.
+  const root = 임시저장소();
+  const dest = path.join(root, '_공통', '기출문제', '정답');
+  fs.mkdirSync(dest, { recursive: true });
+
+  const snap = audit.snapshot({ monitorRoots: [root], integrityTargets: [] });
+  // 목적지 내부: 정답 파일 생성(정상 산출물).
+  쓰기(root, '_공통/기출문제/정답/2025-3-필기.md', '정답 내용');
+  // 목적지 밖이지만 .omc/(툴 런타임 상태) — 감사 walk 제외 대상이어야 함.
+  쓰기(root, '.omc/state/subagent-tracking.json', '{}');
+  쓰기(root, '.omc/sessions/x.json', '{}');
+
+  const rep = audit.audit(snap, { jobKind: 'extract', destinations: [dest], nickname: 'hun' });
+  assert.strictEqual(rep.clean, true, JSON.stringify(rep.violations));
+  assert.strictEqual(rep.jobReverted, false);
+  // 정답 파일은 유지되어야 함.
+  assert.ok(fs.existsSync(path.join(root, '_공통/기출문제/정답/2025-3-필기.md')));
+  // .omc 파일은 감사가 건드리지 않는다(원복도 삭제도 안 함).
+  assert.ok(fs.existsSync(path.join(root, '.omc/state/subagent-tracking.json')));
+});
+
 test('경계 위반: 목적지 밖 신규 파일 삭제 + 목적지 내 변경까지 잡 전체 원복', () => {
   const root = 임시저장소();
   const dest = path.join(root, 'notes');

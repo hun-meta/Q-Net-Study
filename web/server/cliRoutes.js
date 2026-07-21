@@ -21,7 +21,7 @@ const nickname = require('./nickname');
 const answerKey = require('./answerKey');
 const examIndex = require('./examIndex');
 const configMod = require('./config');
-const { createBridge } = require('./cliBridge');
+const { createBridge, serialize } = require('./cliBridge');
 
 // 경로 세그먼트 안전성 검사(라우트 파라미터·파일명 탈출 차단).
 const UNSAFE = /[\\/\0\r\n\t]/;
@@ -138,14 +138,26 @@ function router(deps) {
       const pdfPath = security.assertWithinRoots(path.join(기출Dir, filename), [기출Dir]);
       const answerPath = security.assertWithinRoots(path.join(정답Dir, `${시험ID}.md`), [정답Dir]);
 
-      // 서버 결정적 쓰기: PDF 원자 배치.
-      원자쓰기(pdfPath, Buffer.from(body.contentBase64, 'base64'));
-      broadcast('fs-change', { kind: 'exam-upload', 시험ID });
+      // 서버 결정적 쓰기(PDF 배치)는 **잡 큐 안(스냅샷 직전)** 에서 수행한다.
+      // 요청 시점에 바로 쓰면 실행 중인 다른 CLI 잡의 감사가 이 PDF 를 "경계 밖 변경"으로
+      // 오인해 그 잡 전체 원복 + 이 PDF 삭제가 일어난다(동시 업로드 레이스 — 실측 재현됨).
+      const placePdf = () => {
+        원자쓰기(pdfPath, Buffer.from(body.contentBase64, 'base64'));
+        broadcast('fs-change', { kind: 'exam-upload', 시험ID });
+        process.stderr.write(`[exam-upload] ${시험ID}: PDF 배치 완료\n`);
+      };
 
-      if (!requireCli('record', res)) return; // PDF 는 배치됨 — 추출만 비활성(수동 폼 경로)
+      if (!cli.record) {
+        // 추출 비활성이어도 PDF 는 배치(수동 폼 경로 — 막다른 길 없음). 큐로 직렬화해 배치.
+        await bridge.enqueue(async () => placePdf());
+        requireCli('record', res); // 503 응답 전송
+        return;
+      }
 
-      // claude 추출 잡(사후 감사: 정답 디렉토리만 목적지).
+      // claude 추출 잡(사후 감사: 정답 디렉토리만 목적지). PDF 배치는 잡 차례에 prepare 로.
+      process.stderr.write(`[exam-upload] ${시험ID}: claude 정답 추출 잡 대기열 등록\n`);
       const job = await bridge.extract({
+        prepare: placePdf,
         pdfPath,
         answerPath,
         examId: 시험ID,
@@ -155,51 +167,81 @@ function router(deps) {
         auditDestinations: [정답Dir],
         integrityTargets: 무결성대상(repoRoot),
       });
+      if (!job.audit.clean) {
+        process.stderr.write(
+          `[exam-upload] ${시험ID}: 감사 위반 — ${(job.audit.violations || []).join(' / ')}\n`
+        );
+        broadcast('audit-warning', { where: 'extract', violations: job.audit.violations });
+      }
 
       // 구조 검증(사람 게이트 아님 — 자동 파싱·도메인·합계 검사).
+      // claude 가 남긴 최종 메시지(job.result) = 실패 시 실제 사유. 폼·로그에 그대로 노출한다.
+      const 추출메시지 = (job.result || '').trim().slice(0, 1000) || null;
       let 정답내용 = null;
       try {
         정답내용 = fs.readFileSync(answerPath, 'utf8');
       } catch (_e) {
+        // 파일 미생성: 타임아웃·오류·감사원복·판독불가 등을 구분해 사유를 명시한다.
+        const reason = job.timedOut
+          ? '자동 추출이 제한 시간(5분)을 초과했습니다.'
+          : job.isError
+          ? '자동 추출 중 오류가 발생했습니다.'
+          : job.audit && !job.audit.clean
+          ? '추출 결과가 사후 감사로 원복되었습니다(잡 실행 중 승인 경계 밖 파일 변경 감지). 잠시 후 같은 PDF 로 다시 업로드해 보세요.'
+          : '자동 추출이 정답 파일을 만들지 못했습니다(판독 불가·정답표 없음·저작권 자료 등). 아래 사유를 확인하세요.';
+        process.stderr.write(
+          `[exam-upload] ${시험ID}: 정답 파일 미생성 — timedOut=${job.timedOut} isError=${job.isError} ` +
+            `auditClean=${job.audit && job.audit.clean} claude="${(job.result || '').replace(/\s+/g, ' ').trim().slice(0, 240)}"\n`
+        );
         return res.json({
           ok: false,
           needsManualForm: true,
-          reason: '추출 결과 파일이 없습니다(스캔 이미지 등). 정답 수동 입력 폼을 사용하세요.',
+          reason,
+          추출메시지, // claude 가 남긴 실제 사유(있으면)
+          timedOut: job.timedOut,
+          isError: job.isError,
           audit: job.audit,
         });
       }
       const parsed = answerKey.parse(정답내용, { 시험ID, 총페이지 });
       if (parsed.검증오류.length > 0) {
+        process.stderr.write(`[exam-upload] ${시험ID}: 정답 구조 검증 실패 — ${parsed.검증오류.join('; ')}\n`);
         return res.json({
           ok: false,
           needsManualForm: true,
+          reason: '추출된 정답의 구조 검증에 실패했습니다(문항수·정답 도메인·페이지 범위 등).',
           검증오류: parsed.검증오류,
+          추출메시지,
           audit: job.audit,
         });
       }
 
-      // 서버 부기: INDEX 행 upsert(원자 쓰기).
-      const indexPath = path.join(기출Dir, 'INDEX.md');
-      let indexSrc = '';
-      try {
-        indexSrc = fs.readFileSync(indexPath, 'utf8');
-      } catch (_e) {
-        /* 없으면 신규 생성 */
-      }
-      const updated = examIndex.upsert(indexSrc, {
-        파일명: filename,
-        연도: 시험조각.연도,
-        식별자: 시험조각.식별자,
-        구분: 시험조각.구분,
-        문항수: parsed.문항수,
-        정답포함: true,
-        숨김페이지수: parsed.숨김페이지수,
-        등록자: nickname.getNickname() || '',
-        비고: `추출:${parsed.추출도구 || 'claude'}`,
+      // 서버 부기: INDEX 행 upsert(원자 쓰기). 다음 잡이 이미 실행 중일 수 있으므로
+      // 잡 큐와 직렬화해 감사 오인(경계 밖 변경)을 원천 차단한다.
+      await serialize(async () => {
+        const indexPath = path.join(기출Dir, 'INDEX.md');
+        let indexSrc = '';
+        try {
+          indexSrc = fs.readFileSync(indexPath, 'utf8');
+        } catch (_e) {
+          /* 없으면 신규 생성 */
+        }
+        const updated = examIndex.upsert(indexSrc, {
+          파일명: filename,
+          연도: 시험조각.연도,
+          식별자: 시험조각.식별자,
+          구분: 시험조각.구분,
+          문항수: parsed.문항수,
+          정답포함: true,
+          숨김페이지수: parsed.숨김페이지수,
+          등록자: nickname.getNickname() || '',
+          비고: `추출:${parsed.추출도구 || 'claude'}`,
+        });
+        원자쓰기(indexPath, Buffer.from(updated, 'utf8'));
       });
-      원자쓰기(indexPath, Buffer.from(updated, 'utf8'));
       broadcast('fs-change', { kind: 'exam-index', 시험ID });
 
+      process.stderr.write(`[exam-upload] ${시험ID}: 정답 ${parsed.문항수}문항 추출·INDEX 부기 완료\n`);
       return res.json({
         ok: true,
         시험ID,

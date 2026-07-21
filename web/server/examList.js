@@ -19,6 +19,7 @@ const pdfSubset = require('./pdfSubset');
 const draftStore = require('./draftStore');
 const nickname = require('./nickname');
 const security = require('./security');
+const { serialize } = require('./cliBridge'); // 저장소 쓰기를 CLI 잡과 직렬화(감사 오인 방지)
 
 // 시험 id: {연도4자리}-{식별자(회차/상시일자)}-{필기|실기}. 경로 구분자·점 불허(탈출 차단).
 const EXAM_ID = /^(\d{4})-([0-9A-Za-z가-힣]+)-(필기|실기)$/;
@@ -384,7 +385,7 @@ function router(deps) {
   // POST /api/exams/:id/answer-key?grade=&cert= → 수동 정답 입력 폼 저장(정답 md 생성기).
   // 추출 실패(needsManualForm) 시 막다른 길 방지 — 서버 결정적 쓰기 + INDEX 부기. 비-GET → 토큰 필수.
   // body: { 숨김페이지수, 과목들:[{ 과목명, 시작, 끝, 정답:{ [문번]:1~4 } }] }
-  r.post('/api/exams/:id/answer-key', (req, res) => {
+  r.post('/api/exams/:id/answer-key', async (req, res) => {
     const ctx = resolveCtx(req, res, true);
     if (!ctx) return undefined;
     const body = req.body || {};
@@ -399,34 +400,38 @@ function router(deps) {
       return res.status(400).json({ error: '정답 구조 검증 실패', 검증오류: parsed.검증오류 });
     }
     try {
-      const dir = 기출Dir(repoRoot, ctx.grade, ctx.cert);
-      const 정답Dir = path.join(dir, 정답);
-      fs.mkdirSync(정답Dir, { recursive: true });
-      // 쓰기 경계 강제(정답 디렉토리 내부인지 realpath 검증).
-      const target = security.assertWithinRoots(path.join(정답Dir, `${ctx.id}.md`), [정답Dir]);
-      atomicWrite(target, Buffer.from(md, 'utf8'));
+      // 저장소 쓰기(정답 md + INDEX)는 CLI 잡 큐와 직렬화 — 실행 중인 잡의 감사가
+      // 이 쓰기를 "경계 밖 변경"으로 오인해 잡 원복·파일 삭제를 일으키지 않게 한다.
+      await serialize(async () => {
+        const dir = 기출Dir(repoRoot, ctx.grade, ctx.cert);
+        const 정답Dir = path.join(dir, 정답);
+        fs.mkdirSync(정답Dir, { recursive: true });
+        // 쓰기 경계 강제(정답 디렉토리 내부인지 realpath 검증).
+        const target = security.assertWithinRoots(path.join(정답Dir, `${ctx.id}.md`), [정답Dir]);
+        atomicWrite(target, Buffer.from(md, 'utf8'));
 
-      // INDEX 부기(원자 upsert). PDF 파일명 = {id}.pdf.
-      const indexPath = path.join(dir, 'INDEX.md');
-      let indexSrc = '';
-      try {
-        indexSrc = fs.readFileSync(indexPath, 'utf8');
-      } catch (_e) {
-        /* 없으면 신규 생성 */
-      }
-      const meta = parseExamId(ctx.id) || {};
-      const updated = examIndex.upsert(indexSrc, {
-        파일명: `${ctx.id}.pdf`,
-        연도: meta.연도,
-        식별자: meta.식별자,
-        구분: meta.구분,
-        문항수: parsed.문항수,
-        정답포함: true,
-        숨김페이지수: parsed.숨김페이지수,
-        등록자: nickname.getNickname() || '',
-        비고: '수동 정답 입력',
+        // INDEX 부기(원자 upsert). PDF 파일명 = {id}.pdf.
+        const indexPath = path.join(dir, 'INDEX.md');
+        let indexSrc = '';
+        try {
+          indexSrc = fs.readFileSync(indexPath, 'utf8');
+        } catch (_e) {
+          /* 없으면 신규 생성 */
+        }
+        const meta = parseExamId(ctx.id) || {};
+        const updated = examIndex.upsert(indexSrc, {
+          파일명: `${ctx.id}.pdf`,
+          연도: meta.연도,
+          식별자: meta.식별자,
+          구분: meta.구분,
+          문항수: parsed.문항수,
+          정답포함: true,
+          숨김페이지수: parsed.숨김페이지수,
+          등록자: nickname.getNickname() || '',
+          비고: '수동 정답 입력',
+        });
+        atomicWrite(indexPath, Buffer.from(updated, 'utf8'));
       });
-      atomicWrite(indexPath, Buffer.from(updated, 'utf8'));
 
       if (deps.hub && typeof deps.hub.broadcast === 'function') {
         deps.hub.broadcast('fs-change', { kind: 'answer-key', 시험ID: ctx.id });

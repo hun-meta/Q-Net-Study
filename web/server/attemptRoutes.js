@@ -21,6 +21,7 @@ const grading = require('./grading');
 const writer = require('./attemptWriter');
 const reader = require('./attemptReader');
 const draftStore = require('./draftStore');
+const { serialize } = require('./cliBridge'); // 저장소 쓰기를 CLI 잡과 직렬화(감사 오인 방지)
 
 const EXAM_ID_RE = /^\d{4}-[^\s/\\]+-(필기|실기)$/u;
 // 경로 구분자·상위참조·제어문자 차단(자격증명 검증).
@@ -120,7 +121,7 @@ function router(deps) {
   });
 
   // ── 제출·채점·기록 ──────────────────────────────────────────────
-  r.post('/api/attempts/:examId/submit', (req, res) => {
+  r.post('/api/attempts/:examId/submit', async (req, res) => {
     // NFC 정규화: 경로·파일명·기존 시도 비교를 NFD 기록과 일관되게 맞춘다
     // (정규식 검증도 정규화 후 수행 — NFD 입력이 필기/실기 리터럴과 어긋나는 것 방지).
     const examId = repo.nfc(req.params.examId);
@@ -176,10 +177,15 @@ function router(deps) {
 
     let paths;
     try {
-      // 내 닉네임 디렉토리(신규일 수 있음)를 먼저 생성해야 경계 realpath 검증이 성립.
-      fs.mkdirSync(attemptsDir, { recursive: true });
-      guardWithinOwnDir(repoRoot, grade, cert, nick, attemptsDir); // 경계 강제
-      paths = writer.writeAttemptBundle(attemptsDir, model);
+      // 풀이 기록 3종(attempt·INDEX·WRONG) 쓰기를 CLI 잡 큐와 직렬화한다 —
+      // 추출·정리 잡(몇 분)이 도는 중에 제출하면, 잡의 사후 감사가 이 기록을
+      // "경계 밖 변경"으로 오인해 잡 원복과 함께 삭제하는 사고를 막는다.
+      await serialize(async () => {
+        // 내 닉네임 디렉토리(신규일 수 있음)를 먼저 생성해야 경계 realpath 검증이 성립.
+        fs.mkdirSync(attemptsDir, { recursive: true });
+        guardWithinOwnDir(repoRoot, grade, cert, nick, attemptsDir); // 경계 강제
+        paths = writer.writeAttemptBundle(attemptsDir, model);
+      });
     } catch (err) {
       const code = err.code === 'EWRITEBOUNDARY' ? 403 : 500;
       return res.status(code).json({ error: err.message });
@@ -221,7 +227,7 @@ function router(deps) {
   });
 
   // ── 키워드/메모 보강(선택·멱등) ─────────────────────────────────
-  r.post('/api/attempts/:examId/keywords', (req, res) => {
+  r.post('/api/attempts/:examId/keywords', async (req, res) => {
     const examId = repo.nfc(req.params.examId); // NFC 정규화(파일명·시험ID 일관)
     const body = req.body || {};
     const { grade, cert } = body;
@@ -243,15 +249,18 @@ function router(deps) {
     if (!fs.existsSync(attemptPath)) return res.status(404).json({ error: '해당 시도 기록을 찾을 수 없습니다.' });
 
     try {
-      guardWithinOwnDir(repoRoot, grade, cert, nick, attemptPath);
-      guardWithinOwnDir(repoRoot, grade, cert, nick, wrongPath);
-      // attempt md: 표 칸 + 오답 헤딩 멱등 패치
-      reader.patchKeywordsFile(attemptPath, 키워드맵);
-      // WRONG.md: 활성 항목 키워드 갱신
-      if (fs.existsSync(wrongPath)) {
-        const patched = writer.patchWrongKeywords(fs.readFileSync(wrongPath, 'utf8'), examId, 키워드맵);
-        writer.atomicWrite(wrongPath, patched);
-      }
+      // 키워드 패치도 CLI 잡 큐와 직렬화(감사 오인 원복 방지 — submit 과 동일 이유).
+      await serialize(async () => {
+        guardWithinOwnDir(repoRoot, grade, cert, nick, attemptPath);
+        guardWithinOwnDir(repoRoot, grade, cert, nick, wrongPath);
+        // attempt md: 표 칸 + 오답 헤딩 멱등 패치
+        reader.patchKeywordsFile(attemptPath, 키워드맵);
+        // WRONG.md: 활성 항목 키워드 갱신
+        if (fs.existsSync(wrongPath)) {
+          const patched = writer.patchWrongKeywords(fs.readFileSync(wrongPath, 'utf8'), examId, 키워드맵);
+          writer.atomicWrite(wrongPath, patched);
+        }
+      });
     } catch (err) {
       const code = err.code === 'EWRITEBOUNDARY' ? 403 : 500;
       return res.status(code).json({ error: err.message });

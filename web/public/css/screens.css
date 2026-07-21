@@ -566,6 +566,13 @@
 .mdl-head { padding: 20px 24px 16px; border-bottom: 1px solid var(--border); flex: none; }
 .mdl-body { flex: 1; overflow: auto; padding: 18px 24px; min-height: 0; }
 
+.mdl-failnotice { background: var(--warn-soft); border: 1px solid var(--warn); border-radius: var(--radius-m); padding: 12px 14px; margin-bottom: 16px; }
+.mdl-failnotice-title { font-weight: 600; font-size: 13px; color: var(--fg); }
+.mdl-failnotice-detail { font-size: 12px; color: var(--fg-muted); margin-top: 6px; }
+.mdl-failnotice-msg { margin-top: 8px; font-size: 12px; }
+.mdl-failnotice-msg summary { cursor: pointer; color: var(--fg-muted); }
+.mdl-failnotice-pre { margin: 8px 0 0; padding: 10px; background: var(--surface-2); border-radius: var(--radius-s); font-size: 12px; white-space: pre-wrap; word-break: break-word; max-height: 220px; overflow: auto; }
+
 .mdl-row { display: flex; gap: 10px; margin-bottom: 16px; }
 .mdl-field { flex: 1; }
 .mdl-field-narrow { width: 130px; flex: none; }
@@ -638,6 +645,12 @@
 /* --------------------------------------------------------------------------
    풀이 화면 (views/solve.js) — 툴바 + 2분할(PDF · OMR)
    -------------------------------------------------------------------------- */
+/* 풀이 화면은 뷰포트 고정 셸: #app 이 통째로 스크롤되지 않게 하고,
+   PDF 뷰어(.sv-pdf-body)와 OMR(.sv-omr-body)이 각자 상하 독립 스크롤하도록 한다.
+   (body 는 기본 min-height:100vh 라 길어지면 페이지 전체가 스크롤됨 → 라우트 한정으로 고정) */
+body.route-solve { height: 100vh; overflow: hidden; }
+body.route-solve .app-main { overflow: hidden; }
+
 .sv {
   flex: 1;
   min-height: 0;

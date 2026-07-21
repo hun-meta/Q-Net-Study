@@ -25,11 +25,13 @@ export async function createViewer(container, ctx, opts) {
   container.innerHTML = '<p class="loading" style="padding:24px">PDF 불러오는 중…</p>';
 
   // 바이트 로드. view 모드는 원본 우선(제출 없으면 403 → 서브셋 폴백).
+  // cache:'no-store' — 서브셋은 정답 재등록·생성 로직 변경으로 내용이 바뀔 수 있는데,
+  // 브라우저 HTTP 캐시가 구 버전을 재검증 없이 재사용하면 "백지/옛 PDF" 사고가 난다(로컬 앱이라 비용 무시 가능).
   let bytes = null;
   let usedFull = false;
   if (mode === 'view') {
     try {
-      const rf = await fetch(`/api/exams/${enc(id)}/pdf-full?${q}`);
+      const rf = await fetch(`/api/exams/${enc(id)}/pdf-full?${q}`, { cache: 'no-store' });
       if (rf.ok) {
         bytes = await rf.arrayBuffer();
         usedFull = true;
@@ -39,7 +41,7 @@ export async function createViewer(container, ctx, opts) {
     }
   }
   if (!bytes) {
-    const r = await fetch(`/api/exams/${enc(id)}/pdf?${q}`);
+    const r = await fetch(`/api/exams/${enc(id)}/pdf?${q}`, { cache: 'no-store' });
     if (!r.ok) {
       const e = await r.json().catch(() => ({}));
       throw new Error(e.error || `PDF 요청 실패 (${r.status})`);
@@ -98,6 +100,21 @@ export async function createViewer(container, ctx, opts) {
 
   await renderPage(current);
 
+  // 견고화: 최초 렌더가 레이아웃 확정 전에 일어났거나 창/패널 폭이 바뀌면
+  // 현재 페이지를 pane 폭에 맞게 다시 그린다(폭이 유의미하게 바뀔 때만 — 루프 방지).
+  let lastWidth = container.clientWidth;
+  let ro = null;
+  if (typeof ResizeObserver !== 'undefined') {
+    ro = new ResizeObserver(() => {
+      const w = container.clientWidth;
+      if (w && Math.abs(w - lastWidth) > 4) {
+        lastWidth = w;
+        renderPage(current);
+      }
+    });
+    ro.observe(container);
+  }
+
   const controller = {
     numPages,
     usedFull,
@@ -139,6 +156,14 @@ export async function createViewer(container, ctx, opts) {
     },
     destroy() {
       renderToken += 1;
+      if (ro) {
+        try {
+          ro.disconnect();
+        } catch (_e) {
+          /* 무시 */
+        }
+        ro = null;
+      }
       try {
         pdf.destroy();
       } catch (_e) {

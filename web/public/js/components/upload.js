@@ -179,7 +179,14 @@ export function renderUploadPanel(container, scope, onDone) {
         const reason = data.reason || (data.검증오류 ? data.검증오류.join('; ') : '자동 추출을 사용할 수 없어요.');
         toast(`${reason} — 수동 입력으로 등록하세요.`, 'info');
         renderIdle();
-        openManualDialog(scope, id, onDone);
+        openManualDialog(scope, id, onDone, {
+          reason,
+          추출메시지: data.추출메시지 || null,
+          검증오류: data.검증오류 || null,
+          감사위반: data.audit && !data.audit.clean ? data.audit.violations || [] : null,
+          timedOut: !!data.timedOut,
+          isError: !!data.isError,
+        });
       } else {
         setStep('read', 'error');
         toast(data.error || '업로드 실패', 'error');
@@ -196,7 +203,7 @@ export function renderUploadPanel(container, scope, onDone) {
 }
 
 // ── 수동 정답 입력 모달 ──────────────────────────────────────────────────────
-export function openManualDialog(scope, presetId, onDone) {
+export function openManualDialog(scope, presetId, onDone, failInfo) {
   const overlay = el('div', 'modal-overlay');
   const box = el('div', 'modal-box mdl-manual');
   box.setAttribute('role', 'dialog');
@@ -212,6 +219,30 @@ export function openManualDialog(scope, presetId, onDone) {
 
   // 본문(스크롤).
   const bodyEl = el('div', 'mdl-body qsc');
+
+  // 자동 추출 실패 사유(있으면) — 왜 수동 입력으로 왔는지 그 자리에서 보여준다.
+  if (failInfo && (failInfo.reason || failInfo.추출메시지 || (failInfo.검증오류 && failInfo.검증오류.length))) {
+    const notice = el('div', 'mdl-failnotice');
+    const title = failInfo.timedOut
+      ? '⏱ 자동 추출이 제한 시간(5분)을 초과했어요.'
+      : failInfo.isError
+      ? '⚠️ 자동 추출 중 오류가 발생했어요.'
+      : `ℹ️ ${failInfo.reason || '자동 추출이 정답 파일을 만들지 못했어요.'}`;
+    notice.append(el('div', 'mdl-failnotice-title', title));
+    if (failInfo.검증오류 && failInfo.검증오류.length) {
+      notice.append(el('div', 'mdl-failnotice-detail', `검증 오류: ${failInfo.검증오류.join('; ')}`));
+    }
+    if (failInfo.감사위반 && failInfo.감사위반.length) {
+      notice.append(el('div', 'mdl-failnotice-detail', `감사 위반: ${failInfo.감사위반.join(' / ')}`));
+    }
+    if (failInfo.추출메시지) {
+      const det = el('details', 'mdl-failnotice-msg');
+      det.append(el('summary', null, '자동 추출 도구가 남긴 메시지 보기'));
+      det.append(el('pre', 'mdl-failnotice-pre', failInfo.추출메시지));
+      notice.append(det);
+    }
+    bodyEl.append(notice);
+  }
 
   const idRow = el('div', 'mdl-row');
   const idField = el('div', 'mdl-field');

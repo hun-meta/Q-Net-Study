@@ -185,6 +185,20 @@ function connectSse() {
     }
   });
 
+  // CLI 감지 변경(cli-change): 서버가 미감지 CLI 를 재검사로 찾으면 배지·기능을 즉시 활성화.
+  es.addEventListener('cli-change', (evt) => {
+    try {
+      const detail = JSON.parse(evt.data); // { chat: bool, record: bool }
+      const { cli } = getState();
+      if (cli && cli.chat) cli.chat.available = !!detail.chat;
+      if (cli && cli.record) cli.record.available = !!detail.record;
+      renderCliBadges();
+      window.dispatchEvent(new CustomEvent('qnet:cli-change', { detail }));
+    } catch (_e) {
+      /* noop */
+    }
+  });
+
   return es;
 }
 

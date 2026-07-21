@@ -81,6 +81,84 @@ test('업로드→추출→구조검증 통과→INDEX 부기(happy path)', asyn
   }
 });
 
+test('[레이스 회귀] 잡 실행 중 두 번째 업로드가 첫 잡을 원복시키지 않는다', async () => {
+  // 재현된 버그: 잡 A 실행 중 사용자가 B 를 업로드하면 서버가 즉시 쓴 B 의 PDF 가
+  // 감사 A 에 "경계 밖 변경"으로 잡혀 잡 A 전체 원복(+B PDF 삭제)됐다.
+  // 수정: PDF 배치를 잡 큐 안(prepare, 스냅샷 직전)으로 직렬화 → 둘 다 성공해야 한다.
+  const rR = fs.mkdtempSync(path.join(os.tmpdir(), 'qnet-race-'));
+  const { deps } = makeDeps(rR, { chat: true, record: true });
+  deps.config = { ...deps.config, cliRecord: `node ${path.join(__dirname, 'fixtures', 'fake-claude-slow.js')}` };
+  const started = await 앱시작(deps);
+  try {
+    const upload = (시험ID) =>
+      fetch(`${started.base}/api/exams/upload`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          grade: '정보처리',
+          cert: '정보처리기사',
+          filename: `${시험ID}.pdf`,
+          시험ID,
+          총페이지: 8,
+          contentBase64: Buffer.from('%PDF fake').toString('base64'),
+        }),
+      }).then((r) => r.json());
+
+    const pA = upload('2030-1-필기');
+    await new Promise((r) => setTimeout(r, 400)); // 잡 A 실행 중(느린 fake claude 1.2s)
+    const pB = upload('2030-2-필기');
+    const [a, b] = await Promise.all([pA, pB]);
+
+    assert.strictEqual(a.ok, true, `A 실패: ${JSON.stringify(a)}`);
+    assert.strictEqual(a.audit.clean, true, `A 감사 위반: ${JSON.stringify(a.audit)}`);
+    assert.strictEqual(b.ok, true, `B 실패: ${JSON.stringify(b)}`);
+    assert.strictEqual(b.audit.clean, true, `B 감사 위반: ${JSON.stringify(b.audit)}`);
+    // 두 정답 파일·두 PDF 모두 살아있어야 한다.
+    const 기출 = path.join(rR, '정보처리', '정보처리기사', '_공통', '기출문제');
+    assert.ok(fs.existsSync(path.join(기출, '정답', '2030-1-필기.md')));
+    assert.ok(fs.existsSync(path.join(기출, '정답', '2030-2-필기.md')));
+    assert.ok(fs.existsSync(path.join(기출, '2030-1-필기.pdf')));
+    assert.ok(fs.existsSync(path.join(기출, '2030-2-필기.pdf')));
+  } finally {
+    started.server.close();
+  }
+});
+
+test('업로드: 추출이 정답 파일을 안 만들면 사유·추출메시지 노출(수동 폼)', async () => {
+  const rX = fs.mkdtempSync(path.join(os.tmpdir(), 'qnet-routesX-'));
+  const { deps } = makeDeps(rX, { chat: true, record: true });
+  // 파일을 만들지 않고 사유만 출력하는 가짜 claude 로 교체.
+  deps.config = { ...deps.config, cliRecord: `node ${path.join(__dirname, 'fixtures', 'fake-claude-noanswer.js')}` };
+  const started = await 앱시작(deps);
+  try {
+    const res = await fetch(`${started.base}/api/exams/upload`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        grade: '정보처리',
+        cert: '정보처리기사',
+        filename: '2025-3-필기.pdf',
+        시험ID: '2025-3-필기',
+        총페이지: 8,
+        contentBase64: Buffer.from('%PDF fake').toString('base64'),
+      }),
+    });
+    const data = await res.json();
+    assert.strictEqual(res.status, 200, JSON.stringify(data));
+    assert.strictEqual(data.ok, false, JSON.stringify(data));
+    assert.strictEqual(data.needsManualForm, true);
+    assert.ok(data.reason && data.reason.length > 0, '사유 문구가 있어야 함');
+    assert.ok(data.추출메시지 && data.추출메시지.includes('저작권'), 'claude 실제 사유가 노출돼야 함');
+    assert.strictEqual(data.isError, false);
+    // 정답 파일은 만들어지지 않음. PDF 는 배치됨.
+    const 기출 = path.join(rX, '정보처리', '정보처리기사', '_공통', '기출문제');
+    assert.ok(!fs.existsSync(path.join(기출, '정답', '2025-3-필기.md')));
+    assert.ok(fs.existsSync(path.join(기출, '2025-3-필기.pdf')));
+  } finally {
+    started.server.close();
+  }
+});
+
 test('업로드: record CLI 미감지 → PDF 배치 후 503(수동 폼 경로)', async () => {
   const r2 = fs.mkdtempSync(path.join(os.tmpdir(), 'qnet-routes2-'));
   const { deps } = makeDeps(r2, { chat: true, record: false });

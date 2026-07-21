@@ -26,7 +26,10 @@ const crypto = require('crypto');
 const { execFileSync } = require('child_process');
 
 // walk에서 항상 제외하는 디렉토리(재생성 가능 상태·VCS 내부·의존성).
-const EXCLUDED_DIRS = new Set(['.git', 'node_modules', '.qnet-web']);
+// .omc: 사용자 전역 CLAUDE.md가 로드하는 툴(OMC) 런타임 상태. claude/agy 잡 서브프로세스가
+//       실행 중 .omc/state·sessions 등에 상태를 쓰므로, 제외하지 않으면 정상 잡의 정답·기록이
+//       "목적지 밖 변경"으로 오인돼 잡 전체가 원복된다(.qnet-web 과 동일하게 gitignore·재생성 가능).
+const EXCLUDED_DIRS = new Set(['.git', 'node_modules', '.qnet-web', '.omc']);
 
 // 이 크기 이하 파일만 복원용 Buffer를 보관한다(그 이상은 지문만 — F5).
 const MAX_RESTORE_BYTES = 1024 * 1024; // 1MB — md 노트·정답은 수 KB, PDF는 초과.
