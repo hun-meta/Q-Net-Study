@@ -1,14 +1,17 @@
-// OMR 레일: ①~④ 선택 + 찍음 표시. 디바운스 임시저장·이어풀기.
-// 솔브 뷰(views/solve.js)가 renderOmr가 반환한 controller로 솔브바(진행률·경과·제출)와
-// 키보드를 구동한다. 정답 미등록 시 열람만(채점 불가) → controller 없이 null 반환.
-//
-// 계산 로직 계약(불변): 드래프트 선로드 / 디바운스 저장 / 제출 시 무응답 null 채움 / 소요시간(분).
-// 드래프트 미러: 저장 성공 시 mirrorDraft, 제출 성공 시 removeDraftMirror(로컬 이어풀기 목록 갱신).
+// OMR: ①~④ 선택(34px 원형) + 찍음 + 문항 도구(개념/챗). 디바운스 임시저장·이어풀기.
+// renderOmr → controller(solve 뷰가 진행률·경과·제출·키보드 구동). 정답 미등록 → 등록:false.
+// renderAnswerTable → view(답 포함 열람) 모드 정답표(읽기 전용). 서버 /answers 사용.
 
 import { apiFetch, mirrorDraft, removeDraftMirror } from '../store.js';
 
-const OPTIONS = ['①', '②', '③', '④']; // 표시용. 값은 index+1 (1~4).
+const OPTIONS = ['①', '②', '③', '④'];
 const DEBOUNCE_MS = 800;
+const enc = encodeURIComponent;
+
+const ICON_CONCEPT =
+  '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3.5h5a1.5 1.5 0 0 1 1.5 1.5v8"></path><path d="M13 3.5H8A1.5 1.5 0 0 0 6.5 5v8"></path></svg>';
+const ICON_CHAT =
+  '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 4a1.5 1.5 0 0 1 1.5-1.5h8A1.5 1.5 0 0 1 13.5 4v5A1.5 1.5 0 0 1 12 10.5H6l-3 2.5V4z"></path></svg>';
 
 async function getJson(url) {
   const res = await fetch(url);
@@ -19,36 +22,36 @@ async function getJson(url) {
   return res.json();
 }
 
-function el(tag, className, text) {
+function el(tag, cls, text) {
   const node = document.createElement(tag);
-  if (className) node.className = className;
+  if (cls) node.className = cls;
   if (text != null) node.textContent = text;
   return node;
 }
 
-// renderOmr(container, ctx) → controller | null
+function subjectHeader(name, from, to) {
+  const h = el('div', 'omr-subject');
+  h.append(el('span', 'omr-subject-name', name), el('span', 'omr-subject-range', `${from}–${to}`), el('div', 'omr-subject-line'));
+  return h;
+}
+
+// renderOmr(container, ctx) → controller | { 등록:false, unmount }
 // ctx: { grade, cert, id, onProgress?(done,total), onConcept?(qno), onChat?(qno), onCurrentChange?(qno) }
 export async function renderOmr(container, ctx) {
   const { grade, cert, id } = ctx;
-  container.innerHTML = '<p class="loading">OMR 불러오는 중…</p>';
+  container.innerHTML = '<p class="loading" style="padding:16px">OMR 불러오는 중…</p>';
 
-  const q = `grade=${encodeURIComponent(grade)}&cert=${encodeURIComponent(cert)}`;
-  const 구조 = await getJson(`/api/exams/${encodeURIComponent(id)}/omr?${q}`);
-
+  const q = `grade=${enc(grade)}&cert=${enc(cert)}`;
+  const 구조 = await getJson(`/api/exams/${enc(id)}/omr?${q}`);
   container.innerHTML = '';
 
   if (!구조.등록) {
-    container.append(
-      el('p', 'exam-notice', '정답이 등록되지 않은 기출입니다 — 채점 불가(열람만 가능).')
-    );
-    // 정답이 나중에 등록되면(fs-change) 자동 재시도. 컨테이너가 사라지면 리스너 해제(누수 방지).
+    // 정답 미등록(열람만) — solve 뷰가 안내 카드/비활성 제출을 담당. 등록 시 자동 재시도.
     const onFs = () => {
       window.removeEventListener('qnet:fs-change', onFs);
       if (container.isConnected) renderOmr(container, ctx).catch(() => {});
     };
     window.addEventListener('qnet:fs-change', onFs);
-    // 미등록 컨트롤러: 채점 불가(등록:false). solve 언마운트 시 fs-change 리스너를
-    // 정리할 수 있도록 unmount() 를 제공한다(null 대신).
     return {
       등록: false,
       unmount() {
@@ -57,106 +60,98 @@ export async function renderOmr(container, ctx) {
     };
   }
 
-  // 상태: 답(1~4), 찍음(bool). 이어풀기용 드래프트 선로드.
   const answers = {}; // { 문번: 1~4 }
   const marked = {}; // { 문번: true }
   const startedAt = Date.now();
 
   try {
-    const { draft } = await getJson(`/api/draft/${encodeURIComponent(id)}`);
+    const { draft } = await getJson(`/api/draft/${enc(id)}`);
     if (draft && draft.answers) Object.assign(answers, draft.answers);
     if (draft && draft.찍음) Object.assign(marked, draft.찍음);
   } catch (_e) {
-    /* 드래프트 없음/실패는 무시하고 새로 시작 */
+    /* 드래프트 없음 — 새로 시작 */
   }
 
   const total = Number(구조.문항수) || 0;
-  const rowRefs = {}; // 문번 → { row, optBtns, mark }
-  let currentN = null; // 현재 문항(키보드·하이라이트 대상)
+  const rowRefs = {};
+  let currentN = null;
 
   function doneCount() {
     return Object.keys(answers).filter((k) => answers[k] != null).length;
   }
+  function guessedCount() {
+    return Object.keys(marked).filter((k) => marked[k]).length;
+  }
   function updateProgress() {
-    if (typeof ctx.onProgress === 'function') ctx.onProgress(doneCount(), total);
+    if (typeof ctx.onProgress === 'function') ctx.onProgress(doneCount(), total, guessedCount());
   }
 
-  // --- 과목별 문항 렌더 ---
   for (const subj of 구조.과목들 || []) {
-    container.append(el('div', 'omr-subject', `${subj.과목명} (${subj.시작}-${subj.끝})`));
-    for (let n = subj.시작; n <= subj.끝; n += 1) {
-      container.append(renderRow(n));
-    }
+    container.append(subjectHeader(subj.과목명, subj.시작, subj.끝));
+    for (let n = subj.시작; n <= subj.끝; n += 1) container.append(renderRow(n));
   }
   updateProgress();
+
+  function toolBtn(kind, n) {
+    const b = el('button', 'omr-tool-btn');
+    b.type = 'button';
+    b.innerHTML = kind === 'concept' ? ICON_CONCEPT : ICON_CHAT;
+    b.title = kind === 'concept' ? '개념 보기' : '문항 챗';
+    b.setAttribute('aria-label', `${n}번 ${kind === 'concept' ? '개념 보기' : '챗'}`);
+    b.addEventListener('click', () => {
+      setCurrent(n);
+      if (kind === 'concept') ctx.onConcept(n);
+      else ctx.onChat(n);
+    });
+    return b;
+  }
 
   function renderRow(n) {
     const row = el('div', 'omr-row');
     row.dataset.qno = String(n);
-    row.append(el('span', 'qno', String(n)));
+    row.append(el('span', 'omr-qno', String(n)));
+
+    const opts = el('div', 'omr-opts');
     const optBtns = [];
     OPTIONS.forEach((label, idx) => {
       const val = idx + 1;
-      const b = el('button', 'omr-opt', label);
+      const b = el('button', 'omr-opt' + (answers[n] === val ? ' sel' : ''), label);
+      b.type = 'button';
       b.setAttribute('aria-label', `${n}번 ${val}번 보기 선택`);
-      if (answers[n] === val) b.classList.add('sel');
       b.addEventListener('click', () => {
         setCurrent(n);
-        setOption(n, val, true); // 클릭: 같은 값 재선택 시 해제
+        setOption(n, val, true);
       });
       optBtns.push(b);
-      row.append(b);
+      opts.append(b);
     });
-    const mark = el('span', `omr-mark${marked[n] ? ' on' : ''}`, '찍음');
-    mark.title = '모르고 찍은 문항 표시(확신도=찍음)';
-    mark.setAttribute('role', 'button');
-    mark.setAttribute('tabindex', '0');
-    mark.setAttribute('aria-label', `${n}번 찍음 표시 토글`);
-    const markToggle = () => {
+    row.append(opts);
+
+    const guess = el('button', 'omr-guess' + (marked[n] ? ' on' : ''));
+    guess.type = 'button';
+    guess.title = '모르고 찍은 문항 표시(확신도=찍음)';
+    guess.setAttribute('aria-label', `${n}번 찍음 표시 토글`);
+    const gbox = el('span', 'omr-guess-box');
+    gbox.textContent = marked[n] ? '✓' : '';
+    guess.append(gbox, document.createTextNode('찍음'));
+    guess.addEventListener('click', () => {
       setCurrent(n);
       toggleMark(n);
-    };
-    mark.addEventListener('click', markToggle);
-    mark.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' || e.key === ' ') {
-        e.preventDefault();
-        markToggle();
-      }
     });
-    row.append(mark);
+    row.append(guess);
 
-    // 문항별 개념 보기·챗 트리거(상위에서 콜백 주입).
-    if (typeof ctx.onConcept === 'function') {
-      const c = el('button', 'omr-qtool', '개념');
-      c.title = '이 문항 개념·풀이 보기';
-      c.setAttribute('aria-label', `${n}번 개념 보기`);
-      c.addEventListener('click', () => {
-        setCurrent(n);
-        ctx.onConcept(n);
-      });
-      row.append(c);
-    }
-    if (typeof ctx.onChat === 'function') {
-      const ch = el('button', 'omr-qtool', '챗');
-      ch.title = '이 문항 AI 챗';
-      ch.setAttribute('aria-label', `${n}번 챗`);
-      ch.addEventListener('click', () => {
-        setCurrent(n);
-        ctx.onChat(n);
-      });
-      row.append(ch);
-    }
-    rowRefs[n] = { row, optBtns, mark };
+    const tools = el('div', 'omr-tools');
+    if (typeof ctx.onConcept === 'function') tools.append(toolBtn('concept', n));
+    if (typeof ctx.onChat === 'function') tools.append(toolBtn('chat', n));
+    row.append(tools);
+
+    rowRefs[n] = { row, optBtns, guess, gbox };
     return row;
   }
 
-  // --- 상태 변경 ---
   function setOption(n, val, fromClick) {
-    if (fromClick && answers[n] === val) {
-      delete answers[n]; // 클릭 시 같은 값 다시 누르면 해제
-    } else {
-      answers[n] = val;
-    }
+    if (fromClick && answers[n] === val) delete answers[n];
+    else answers[n] = val;
     const refs = rowRefs[n];
     if (refs) refs.optBtns.forEach((ob, i) => ob.classList.toggle('sel', answers[n] === i + 1));
     updateProgress();
@@ -166,7 +161,11 @@ export async function renderOmr(container, ctx) {
     if (marked[n]) delete marked[n];
     else marked[n] = true;
     const refs = rowRefs[n];
-    if (refs) refs.mark.classList.toggle('on', !!marked[n]);
+    if (refs) {
+      refs.guess.classList.toggle('on', !!marked[n]);
+      refs.gbox.textContent = marked[n] ? '✓' : '';
+    }
+    updateProgress(); // 찍음 수 카운터 갱신(솔브바 onProgress가 guessed 재조회)
     scheduleSave();
   }
   function setCurrent(n) {
@@ -180,26 +179,20 @@ export async function renderOmr(container, ctx) {
   function moveCurrent(delta) {
     if (currentN == null) return;
     let n = currentN + delta;
-    while (n >= 1 && n <= total && !rowRefs[n]) n += delta; // 빈 번호 건너뛰기
+    while (n >= 1 && n <= total && !rowRefs[n]) n += delta;
     if (rowRefs[n]) setCurrent(n);
   }
 
-  // 초기 현재 문항: 드래프트(이어풀기) 복원 시 첫 미응답 문항(전부 응답됐으면 마지막),
-  // 드래프트가 없으면 첫 문항. 이어풀기 진입에서 커서가 1번으로 돌아가 이미 푼 문항을
-  // 덮어쓰는 것을 막는다.
+  // 초기 현재 문항: 이어풀기 시 첫 미응답(없으면 마지막), 아니면 첫 문항.
   const orderedNos = [];
   for (const subj of 구조.과목들 || []) {
-    for (let n = subj.시작; n <= subj.끝; n += 1) {
-      if (rowRefs[n]) orderedNos.push(n);
-    }
+    for (let n = subj.시작; n <= subj.끝; n += 1) if (rowRefs[n]) orderedNos.push(n);
   }
   if (orderedNos.length) {
     const firstUnanswered = orderedNos.find((n) => answers[n] == null);
-    const initialN = firstUnanswered != null ? firstUnanswered : orderedNos[orderedNos.length - 1];
-    setCurrent(initialN);
+    setCurrent(firstUnanswered != null ? firstUnanswered : orderedNos[orderedNos.length - 1]);
   }
 
-  // --- 디바운스 임시저장 ---
   let saveTimer = null;
   function scheduleSave() {
     if (saveTimer) clearTimeout(saveTimer);
@@ -208,30 +201,22 @@ export async function renderOmr(container, ctx) {
   async function saveDraft() {
     saveTimer = null;
     try {
-      await apiFetch(`/api/draft/${encodeURIComponent(id)}`, {
-        method: 'PUT',
-        body: { answers, 찍음: marked, grade, cert },
-      });
-      // 저장 성공 → 로컬 이어풀기 미러 갱신(실패해도 저장 자체엔 영향 없음).
+      await apiFetch(`/api/draft/${enc(id)}`, { method: 'PUT', body: { answers, 찍음: marked, grade, cert } });
       try {
         mirrorDraft({ grade, cert, examId: id, done: doneCount(), total, ts: Date.now() });
       } catch (_e) {
-        /* 미러는 부가 — 실패 무시 */
+        /* 미러 부가 */
       }
     } catch (_e) {
-      /* 자동저장 실패는 조용히 넘어가고 다음 변경에서 재시도 */
+      /* 자동저장 실패는 조용히 재시도 */
     }
   }
 
-  // --- 제출·채점 ---
-  // 결과 UI(result.js)가 qnet:attempt-submitted 로 수신. 반환값은 솔브바 상태 표시에 사용.
   async function submit() {
-    // 마지막 변경을 즉시 반영(디바운스 대기 취소).
     if (saveTimer) {
       clearTimeout(saveTimer);
       saveTimer = null;
     }
-    // 무응답은 null로 채운다(계약: answers:{[문번]:1~4|null}).
     const answersOut = {};
     for (let n = 1; n <= total; n += 1) answersOut[n] = answers[n] != null ? answers[n] : null;
     const body = {
@@ -241,18 +226,14 @@ export async function renderOmr(container, ctx) {
       찍음: marked,
       소요시간: Math.max(0, Math.round((Date.now() - startedAt) / 60000)),
     };
-    const res = await apiFetch(`/api/attempts/${encodeURIComponent(id)}/submit`, {
-      method: 'POST',
-      body,
-    });
+    const res = await apiFetch(`/api/attempts/${enc(id)}/submit`, { method: 'POST', body });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || '제출 실패');
     window.dispatchEvent(new CustomEvent('qnet:attempt-submitted', { detail: data }));
-    // 제출 성공 → 로컬 이어풀기 미러 제거(서버는 draft 삭제됨).
     try {
       removeDraftMirror(grade, cert, id);
     } catch (_e) {
-      /* 미러 정리는 부가 — 실패 무시 */
+      /* 미러 정리 부가 */
     }
     return data;
   }
@@ -260,12 +241,17 @@ export async function renderOmr(container, ctx) {
   return {
     등록: true,
     total,
+    get answered() {
+      return doneCount();
+    },
+    get guessed() {
+      return Object.keys(marked).filter((k) => marked[k]).length;
+    },
     get current() {
       return currentN;
     },
     setCurrent,
     moveCurrent,
-    // 키보드용: 대상 문항을 현재로 만들고 값 설정(토글 없이 지정).
     setOption(n, val) {
       setCurrent(n);
       setOption(n, val, false);
@@ -278,5 +264,45 @@ export async function renderOmr(container, ctx) {
     getElapsedMs() {
       return Date.now() - startedAt;
     },
+    unmount() {
+      if (saveTimer) clearTimeout(saveTimer);
+    },
   };
+}
+
+// view(답 포함 열람) 모드 정답표(읽기 전용). 서버 GET /api/exams/:id/answers.
+export async function renderAnswerTable(container, ctx) {
+  const { grade, cert, id } = ctx;
+  container.innerHTML = '<p class="loading" style="padding:16px">정답표 불러오는 중…</p>';
+  const q = `grade=${enc(grade)}&cert=${enc(cert)}`;
+  const res = await fetch(`/api/exams/${enc(id)}/answers?${q}`);
+  if (!res.ok) {
+    const e = await res.json().catch(() => ({}));
+    container.innerHTML = '';
+    container.append(el('p', 'exam-notice', e.error || '정답표를 불러오지 못했어요.'));
+    return { 등록: false };
+  }
+  const data = await res.json();
+  container.innerHTML = '';
+  let total = 0;
+  for (const subj of data.과목들 || []) {
+    container.append(subjectHeader(subj.과목명, subj.시작, subj.끝));
+    for (let n = subj.시작; n <= subj.끝; n += 1) {
+      total += 1;
+      const key = subj.정답 && subj.정답[n];
+      const row = el('div', 'omr-row view');
+      row.append(el('span', 'omr-qno', String(n)));
+      const opts = el('div', 'omr-opts');
+      OPTIONS.forEach((label, idx) => {
+        const on = key === idx + 1;
+        opts.append(el('div', 'omr-opt-v' + (on ? ' correct' : ''), label));
+      });
+      row.append(opts);
+      const ans = el('span', 'omr-answer-label');
+      ans.append(document.createTextNode('정답 '), el('span', 'omr-answer-glyph', key ? OPTIONS[key - 1] : '—'));
+      row.append(ans);
+      container.append(row);
+    }
+  }
+  return { 등록: true, 문항수: data.문항수 || total };
 }

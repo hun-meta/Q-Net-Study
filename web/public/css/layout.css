@@ -1,36 +1,104 @@
 /* ==========================================================================
    Q-Net 기출 풀이 — layout.css
-   셸(헤더/배너/본문 그리드/푸터) · 사이드바 · 브레드크럼 · 라우트 전환 · 반응형.
-   body 상태 클래스 계약(라우터 구현):
-     · 기본            → 사이드바 노출(데스크톱 in-grid, 모바일 오프캔버스)
-     · route-solve     → 사이드바 오프캔버스(몰입 모드, 기본 접힘)
-     · sidebar-open    → 오프캔버스 사이드바를 슬라이드 인(그림자 + 스크림)
+   셸(감사 배너 · 브레드크럼 헤더 · 메인) · 헤더 우측 클러스터(SSE·CLI·테마·닉네임).
+   디자인 산출물의 breadcrumb IA(사이드바 없음). body는 세로 flex, 메인이 스크롤 컨테이너.
    ========================================================================== */
 
-/* --------------------------------------------------------------------------
-   헤더(sticky · 반투명 blur)
-   -------------------------------------------------------------------------- */
-.shell-header {
-  position: sticky;
-  top: 0;
-  z-index: 200;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  min-height: var(--header-h);
-  padding: 10px 24px;
-  border-bottom: 1px solid var(--border);
-  background: color-mix(in srgb, var(--surface) 82%, transparent);
-  backdrop-filter: saturate(1.6) blur(8px);
-  -webkit-backdrop-filter: saturate(1.6) blur(8px);
+html,
+body {
+  margin: 0;
+  padding: 0;
 }
 
-/* 브랜드: 사이드바 토글 + 로고 마크 + 타이틀 */
-.brand {
+body {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  overflow-x: hidden;
+}
+
+/* 메인 = 스크롤 컨테이너(헤더 아래 영역). 화면(뷰)이 각자 max-width·패딩을 관장. */
+.app-main {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+/* --------------------------------------------------------------------------
+   감사 경고 배너(danger 스트립) — 기본 숨김, audit-warning 시 노출
+   -------------------------------------------------------------------------- */
+.audit-banner {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 11px 20px;
+  background: var(--danger-weak);
+  border-bottom: 1px solid var(--danger);
+  color: var(--danger);
+  animation: qfade .2s;
+}
+
+.audit-banner[hidden] {
+  display: none;
+}
+
+.audit-banner-body {
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.audit-banner-body b {
+  font-weight: 650;
+}
+
+.audit-banner-path {
+  opacity: .85;
+  margin-top: 2px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.audit-banner-close {
+  margin-left: auto;
+  flex: none;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--danger);
+  opacity: .7;
+  padding: 2px;
+  display: inline-flex;
+}
+
+.audit-banner-close:hover { opacity: 1; }
+
+/* --------------------------------------------------------------------------
+   헤더(54px · 반투명 blur · sticky)
+   -------------------------------------------------------------------------- */
+.app-header {
+  position: sticky;
+  top: 0;
+  z-index: 40;
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 14px;
+  height: var(--header-h);
+  padding: 0 18px;
+  background: color-mix(in oklab, var(--surface) 88%, transparent);
+  backdrop-filter: saturate(1.4) blur(10px);
+  -webkit-backdrop-filter: saturate(1.4) blur(10px);
+  border-bottom: 1px solid var(--border);
+  flex: none;
+}
+
+.app-header[hidden] { display: none; }
+
+.hdr-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
   min-width: 0;
 }
 
@@ -40,364 +108,319 @@
   justify-content: center;
   width: 26px;
   height: 26px;
-  border-radius: 8px;
+  border-radius: 7px;
   background: var(--accent);
-  color: var(--accent-fg-on);
-  font-weight: 800;
-  font-size: 15px;
-  line-height: 1;
-  letter-spacing: -0.02em;
-  box-shadow: var(--shadow-1);
-  flex: 0 0 auto;
-}
-
-.shell-header h1 {
-  margin: 0;
-  font-size: 16px;
+  color: var(--accent-fg);
   font-weight: 700;
-  letter-spacing: -0.01em;
-  white-space: nowrap;
-}
-
-/* 헤더 우측 액션 묶음(CLI 도트 · 테마 토글 · 닉네임) */
-.shell-header-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-/* 사이드바/테마 토글 아이콘 버튼 — 정사각 근사 */
-.sidebar-toggle,
-.theme-toggle {
-  min-width: 34px;
-  justify-content: center;
-}
-
-/* CLI 상태 도트(헤더) — ok/warn */
-.cli-dot {
-  display: inline-flex;
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  background: var(--fg-faint);
-}
-
-.cli-dot.ok   { background: var(--ok); }
-.cli-dot.warn { background: var(--warn); }
-.cli-dot[hidden] { display: none; }
-
-/* 닉네임 영역(우측) — 드롭다운 앵커 */
-.nickname-area {
-  position: relative;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 14px;
-  color: var(--fg-muted);
-}
-
-/* --------------------------------------------------------------------------
-   CLI 감지 상태 배너 — 슬림 스트립(기본 경고, .ok 성공)
-   -------------------------------------------------------------------------- */
-.cli-banner {
-  margin: 0;
-  padding: 7px 24px;
   font-size: 13px;
-  border-bottom: 1px solid var(--border);
-  background: var(--warn-soft);
-  color: var(--warn);
+  letter-spacing: -.5px;
+  flex: none;
 }
 
-.cli-banner::before {
-  content: "\25CF"; /* ● 상태 도트 */
-  margin-right: 8px;
-  font-size: 10px;
-  vertical-align: middle;
-}
-
-.cli-banner.ok {
-  background: var(--ok-soft);
-  color: var(--ok);
-}
-
-.cli-banner[hidden] {
-  display: none;
-}
-
-/* --------------------------------------------------------------------------
-   본문 그리드 — 사이드바(260px) + 메인
-   -------------------------------------------------------------------------- */
-.shell-body {
-  display: grid;
-  grid-template-columns: var(--sidebar-w) minmax(0, 1fr);
-  align-items: start;
-}
-
-.shell-main {
-  min-width: 0;
-  max-width: 1180px;
-  margin: 0 auto;
-  padding: 24px;
-  width: 100%;
-}
-
-/* --------------------------------------------------------------------------
-   사이드바
-   -------------------------------------------------------------------------- */
-.shell-sidebar {
-  position: sticky;
-  top: var(--header-h);
-  align-self: start;
-  height: calc(100vh - var(--header-h));
-  overflow-y: auto;
-  border-right: 1px solid var(--border);
-  background: var(--surface);
-}
-
-.sidebar-nav {
+/* 브레드크럼 */
+.crumbs {
   display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 16px 12px;
-}
-
-.sidebar-home {
-  display: block;
-  padding: 8px 10px;
-  border-radius: var(--radius-s);
-  color: var(--fg);
-  text-decoration: none;
-  font-weight: 600;
-  font-size: 14px;
-  transition: background .15s ease, color .15s ease;
-}
-
-.sidebar-home:hover {
-  background: var(--surface-2);
-}
-
-.sidebar-group {
-  margin-top: 10px;
-}
-
-.sidebar-group-title {
-  padding: 4px 10px;
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: .04em;
-  text-transform: uppercase;
-  color: var(--fg-faint);
-}
-
-.sidebar-list {
-  list-style: none;
-  margin: 2px 0 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.sidebar-link {
-  display: block;
-  padding: 7px 10px;
-  border-radius: var(--radius-s);
-  color: var(--fg-muted);
-  text-decoration: none;
-  font-size: 14px;
-  transition: background .15s ease, color .15s ease;
-}
-
-.sidebar-link:hover {
-  background: var(--surface-2);
-  color: var(--fg);
-}
-
-.sidebar-link.active,
-.sidebar-link[aria-current="page"] {
-  background: var(--accent-soft);
-  color: var(--accent);
-  font-weight: 600;
-}
-
-.sidebar-empty {
-  padding: 8px 10px;
-}
-
-.sidebar-add {
-  margin-top: 12px;
-  width: 100%;
-  text-align: left;
-  padding: 9px 10px;
-  border: 1px dashed var(--border-strong);
-  border-radius: var(--radius-s);
-  background: transparent;
-  color: var(--accent);
-  font: inherit;
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: background .15s ease, border-color .15s ease;
-}
-
-.sidebar-add:hover {
-  background: var(--accent-soft);
-  border-color: var(--accent);
-}
-
-/* --------------------------------------------------------------------------
-   오프캔버스 사이드바 — 풀이 몰입 모드(route-solve)
-   -------------------------------------------------------------------------- */
-body.route-solve .shell-body {
-  grid-template-columns: minmax(0, 1fr);
-}
-
-body.route-solve .shell-sidebar {
-  position: fixed;
-  top: var(--header-h);
-  left: 0;
-  width: var(--sidebar-w);
-  height: calc(100vh - var(--header-h));
-  transform: translateX(-100%);
-  transition: transform .2s ease;
-  z-index: 150;
-}
-
-body.route-solve.sidebar-open .shell-sidebar {
-  transform: translateX(0);
-  box-shadow: var(--shadow-2);
-}
-
-/* 오프캔버스 스크림(순수 시각 — 클릭 통과) */
-body.route-solve.sidebar-open::before {
-  content: "";
-  position: fixed;
-  inset: var(--header-h) 0 0 0;
-  z-index: 140;
-  background: var(--scrim);
-  pointer-events: none;
-}
-
-/* --------------------------------------------------------------------------
-   푸터 · 연결 상태
-   -------------------------------------------------------------------------- */
-.app-footer {
-  padding: 10px 24px;
-  font-size: 12.5px;
-  color: var(--fg-faint);
-  border-top: 1px solid var(--border);
-  background: var(--surface);
-}
-
-.conn-status {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-}
-
-.conn-status::before {
-  content: "\25CF"; /* ● */
-  font-size: 9px;
-  color: var(--fg-faint);
-}
-
-.conn-status.on::before  { color: var(--ok); }
-.conn-status.off::before { color: var(--danger); }
-
-/* --------------------------------------------------------------------------
-   브레드크럼
-   -------------------------------------------------------------------------- */
-.crumb {
-  display: flex;
-  flex-wrap: wrap;
   align-items: center;
   gap: 6px;
-  margin: 0 0 16px;
-  font-size: 13px;
-  color: var(--fg-muted);
+  min-width: 0;
+  overflow: hidden;
 }
 
 .crumb-link {
-  color: var(--accent);
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 13.5px;
+  font-weight: 500;
+  color: var(--fg-2);
+  white-space: nowrap;
+  padding: 2px 4px;
+  border-radius: 5px;
   text-decoration: none;
 }
 
 .crumb-link:hover {
-  text-decoration: underline;
+  background: var(--surface-2);
+  color: var(--fg);
+  text-decoration: none;
+}
+
+.crumb-current {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--fg);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .crumb-sep {
-  color: var(--fg-faint);
+  display: inline-flex;
+  align-items: center;
+  color: var(--fg-3);
+  flex: none;
 }
 
-.crumb-seg {
-  color: var(--fg-muted);
+/* 헤더 우측 클러스터 */
+.hdr-right {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
 }
 
-.crumb-seg.cert-current {
+/* 실시간(SSE) 뱃지 */
+.sse-badge {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 9px;
+  border-radius: 20px;
+  background: var(--surface-2);
+  font-size: 11px;
+  color: var(--fg-2);
+  white-space: nowrap;
+}
+
+.sse-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--success);
+  box-shadow: 0 0 0 3px var(--success-weak);
+}
+
+.sse-badge.off { color: var(--fg-3); }
+.sse-badge.off .sse-dot {
+  background: var(--fg-3);
+  box-shadow: 0 0 0 3px var(--surface-3);
+}
+
+/* agy/claude CLI 뱃지 그룹 */
+.cli-badges {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 4px;
+  border-radius: 9px;
+  background: var(--surface-2);
+}
+
+.cli-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 7px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--fg-2);
+}
+
+.cli-badge .cli-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--success);
+}
+
+.cli-badge.off {
+  color: var(--fg-3);
+  text-decoration: line-through;
+  opacity: .7;
+}
+
+.cli-badge.off .cli-dot { background: var(--fg-3); }
+
+/* 아이콘 버튼(테마 토글 등) — 32x32 보더 */
+.icon-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--fg-2);
+  transition: background .15s ease, color .15s ease;
+  flex: none;
+}
+
+.icon-btn:hover {
+  background: var(--surface-2);
   color: var(--fg);
-  font-weight: 600;
 }
 
-/* 라우트 로드 실패 폴백 */
+.hdr-divider {
+  width: 1px;
+  height: 22px;
+  background: var(--border);
+  margin: 0 1px;
+}
+
+/* --------------------------------------------------------------------------
+   닉네임 메뉴(헤더 우측) — 아바타 칩 + 드롭다운
+   -------------------------------------------------------------------------- */
+.nickname-area {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.nick-menu-wrap {
+  position: relative;
+}
+
+.nick-chip {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 8px 4px 5px;
+  border-radius: 9px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  cursor: pointer;
+  transition: background .15s ease;
+}
+
+.nick-chip:hover { background: var(--surface-2); }
+
+.nick-avatar {
+  width: 23px;
+  height: 23px;
+  border-radius: 50%;
+  background: var(--accent-weak);
+  color: var(--accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11.5px;
+  font-weight: 700;
+  flex: none;
+}
+
+.nick-name {
+  font-size: 13px;
+  font-weight: 600;
+  max-width: 90px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nick-chip .nick-caret {
+  display: inline-flex;
+  color: var(--fg-3);
+}
+
+/* 드롭다운 메뉴 카드 */
+.nick-menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 8px);
+  z-index: 60;
+  width: 200px;
+  display: flex;
+  flex-direction: column;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-m);
+  background: var(--surface);
+  box-shadow: var(--shadow-lg);
+  animation: qpop .12s;
+}
+
+.nick-menu-head {
+  padding: 8px 10px 6px;
+}
+
+.nick-menu-head .nick-menu-role {
+  font-size: 10px;
+  color: var(--fg-3);
+}
+
+.nick-menu-head .nick-menu-name {
+  font-size: 13.5px;
+  font-weight: 650;
+}
+
+.nick-menu-sep {
+  height: 1px;
+  background: var(--border);
+  margin: 4px 2px;
+}
+
+.nick-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  text-align: left;
+  padding: 8px 10px;
+  border: none;
+  border-radius: var(--radius-s);
+  background: none;
+  color: var(--fg);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background .15s ease;
+}
+
+.nick-menu-item svg { color: var(--fg-2); flex: none; }
+
+.nick-menu-item:hover { background: var(--surface-2); }
+
+.nick-menu-item.danger { color: var(--danger); }
+.nick-menu-item.danger svg { color: var(--danger); }
+.nick-menu-item.danger:hover { background: var(--danger-weak); }
+
+/* 인라인 닉네임 변경 패널(칩 아래 부유 카드) */
+.nick-change {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 8px);
+  z-index: 60;
+  width: 260px;
+  max-width: 84vw;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-m);
+  background: var(--surface);
+  box-shadow: var(--shadow-lg);
+  animation: qpop .12s;
+}
+
+.nick-change select,
+.nick-change .nick-change-new { width: 100%; }
+
+.nick-change-actions {
+  display: flex;
+  gap: 8px;
+}
+
+/* --------------------------------------------------------------------------
+   라우트 로드 실패 폴백
+   -------------------------------------------------------------------------- */
 .route-error {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
   gap: 12px;
-  padding: 24px;
+  padding: 40px 28px;
 }
 
 /* --------------------------------------------------------------------------
-   반응형 — 1000px 미만: 사이드바 오프캔버스(전 라우트)
-   -------------------------------------------------------------------------- */
-@media (max-width: 1000px) {
-  .shell-body {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .shell-sidebar {
-    position: fixed;
-    top: var(--header-h);
-    left: 0;
-    width: var(--sidebar-w);
-    max-width: 84vw;
-    height: calc(100vh - var(--header-h));
-    transform: translateX(-100%);
-    transition: transform .2s ease;
-    z-index: 150;
-  }
-
-  body.sidebar-open .shell-sidebar {
-    transform: translateX(0);
-    box-shadow: var(--shadow-2);
-  }
-
-  body.sidebar-open::before {
-    content: "";
-    position: fixed;
-    inset: var(--header-h) 0 0 0;
-    z-index: 140;
-    background: var(--scrim);
-    pointer-events: none;
-  }
-}
-
-/* --------------------------------------------------------------------------
-   반응형 — 640px 미만: 여백 축소
+   반응형 — 좁은 화면 헤더 여백 축소
    -------------------------------------------------------------------------- */
 @media (max-width: 640px) {
-  .shell-header {
-    padding: 10px 16px;
-  }
-
-  .shell-main {
-    padding: 16px;
-  }
-
-  .cli-banner,
-  .app-footer {
-    padding-left: 16px;
-    padding-right: 16px;
-  }
+  .app-header { padding: 0 12px; gap: 10px; }
+  .cli-badges { display: none; }        /* 좁은 화면에선 CLI 뱃지 접기 */
+  .nick-name { max-width: 60px; }
 }

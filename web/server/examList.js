@@ -333,6 +333,25 @@ function router(deps) {
     });
   });
 
+  // GET /api/exams/:id/answers?grade=&cert= → 정답표(“답 포함 열람” 모드 전용, 읽기 전용).
+  // /omr 과 달리 정답 값을 포함한다. 사용자가 의도적으로 답을 보는 열람 모드에서만 호출하며,
+  // 정답 md가 있는(정답등록) 기출에 한해 노출한다. 답지 PDF 게이팅(pdf-full)과는 무관하다.
+  r.get('/api/exams/:id/answers', (req, res) => {
+    const ctx = resolveCtx(req, res, true);
+    if (!ctx) return undefined;
+    const 정답Path = path.join(기출Dir(repoRoot, ctx.grade, ctx.cert), 정답, `${nfc(ctx.id)}.md`);
+    if (!fs.existsSync(정답Path)) {
+      return res.status(404).json({ error: '정답이 등록되지 않은 기출입니다.' });
+    }
+    const parsed = answerKey.parse(fs.readFileSync(정답Path, 'utf8'), { 시험ID: ctx.id });
+    return res.json({
+      id: ctx.id,
+      등록: true,
+      문항수: parsed.문항수,
+      과목들: parsed.과목들.map((s) => ({ 과목명: s.과목명, 시작: s.시작, 끝: s.끝, 정답: s.정답 })),
+    });
+  });
+
   // --- 임시저장(드래프트): 서버 소유 쓰기. 닉네임은 서버 config에서만 취득(클라 입력 아님) ---
 
   // GET /api/draft/:examId → 이어풀기용 저장 드래프트(없으면 null).

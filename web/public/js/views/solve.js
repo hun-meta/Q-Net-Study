@@ -1,18 +1,12 @@
-// views/solve.js — 풀이 몰입 모드 뷰.
-// 계약: mount(container, { grade, cert, examId }) / unmount(). D의 해시 라우터가 lazy import.
-//
-// 구성:
-//  - 솔브바(sticky): 뒤로 링크(#/cert/...) + 시험ID + 진행률 바 + 경과시간 + 제출 버튼
-//  - 본문: 좌 PDF 뷰어(넓게) + 우 OMR 레일(고정 스크롤, 현재 문항 하이라이트)
-//  - 도구 패널(우측 슬라이드 오버, ~400px): 개념/챗 렌더 + 문항 컨텍스트 칩(#문번 · 시험ID)
-//  - 결과 영역(#result): 제출 후 result.js가 렌더·스크롤 진입
-//  - 키보드(입력 요소 포커스 시 전부 비활성): 1~4 답, g 찍음, ↑/↓ 문항 이동, c 개념, / 챗, ESC 닫기
+// 풀이 화면(#/solve/... = 시험치기, #/view/... = 답 포함 열람).
+// 상단 툴바 + 고정 높이 2분할(좌 PDF / 우 OMR 452px). solve 모드는 OMR, view 모드는 정답표.
+// 문항별 개념/챗은 우측 슬라이드오버 패널. 뷰 계약: mount(container,{grade,cert,examId,mode}) / unmount.
 
-import { renderViewer } from '../components/viewer.js';
-import { renderOmr } from '../components/omr.js';
-import { renderConcept, closeConcept } from '../components/concept.js';
-import { renderChat } from '../components/chat.js';
-import { configureResult } from '../components/result.js'; // side-effect: qnet:attempt-submitted 리스너 등록
+import { createViewer } from '../components/viewer.js';
+import { renderOmr, renderAnswerTable } from '../components/omr.js';
+import { openPanel, closePanel } from '../components/panel.js';
+import { setLastResult } from '../resultStore.js';
+import { solveHash, resultHash, certHash } from '../router.js';
 
 function el(tag, cls, text) {
   const node = document.createElement(tag);
@@ -20,284 +14,188 @@ function el(tag, cls, text) {
   if (text != null) node.textContent = text;
   return node;
 }
+function icon(html, cls) {
+  const s = el('span', cls);
+  s.style.display = 'inline-flex';
+  s.innerHTML = html;
+  return s;
+}
+function iconBtn(html, title, onClick, cls) {
+  const b = el('button', cls || 'sv-icon-btn');
+  b.type = 'button';
+  if (title) b.title = title;
+  b.innerHTML = html;
+  if (onClick) b.addEventListener('click', onClick);
+  return b;
+}
 
-// 입력 요소(텍스트 입력·선택·contenteditable)에 포커스가 있으면 키보드 단축키 비활성.
+function examLabelFromId(id) {
+  const parts = String(id).split('-');
+  if (parts.length >= 3) {
+    const 연도 = parts[0];
+    const 구분 = parts[parts.length - 1];
+    const 식별자 = parts.slice(1, -1).join('-');
+    const 회 = /^\d+$/.test(식별자) ? '회' : '';
+    return `${연도}년 ${식별자}${회} ${구분}`;
+  }
+  return id;
+}
+
 function isTypingTarget(t) {
   if (!t) return false;
   const tag = t.tagName;
   return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || t.isContentEditable === true;
 }
 
-// 문항 컨텍스트 조립기(챗용): 시험ID·문번·PDF 경로·연결 노트/해설 경로.
-// (examList.js buildContextText 로직 이식 — 챗 컨텍스트 계약 불변)
-async function buildContextText({ grade, cert, examId, qno }) {
-  const pdfRel = `${grade}/${cert}/_공통/기출문제/${examId}.pdf`;
-  const lines = [
-    '[문항 컨텍스트]',
-    `시험: ${examId} / 문번: ${qno}`,
-    `자격증: ${grade} / ${cert}`,
-    `기출 PDF: ${pdfRel} (문번 ${qno} 문항 페이지를 직접 확인)`,
-  ];
-  try {
-    const res = await fetch(`/api/concept/${encodeURIComponent(examId)}/${encodeURIComponent(qno)}`);
-    if (res.ok) {
-      const data = await res.json();
-      if (data.노트 && data.노트.length) {
-        lines.push('연결 노트:');
-        for (const n of data.노트) lines.push(`- ${n.과목} · ${n.섹션제목} (${n.닉네임}): ${n.파일}`);
-      }
-      if (data.해설 && data.해설.length) {
-        lines.push('연결 해설:');
-        for (const s of data.해설) lines.push(`- ${s.닉네임}(${s.날짜}): ${s.파일}`);
-      }
-    }
-  } catch (_e) {
-    /* 컨텍스트 부가정보 — 실패해도 기본 컨텍스트로 진행 */
-  }
-  return lines.join('\n');
-}
-
-// 마운트 상태(unmount 정리용).
 let active = null;
 
-export async function mount(container, { grade, cert, examId }) {
-  unmount(); // 중복 마운트 방지(정리 후 재구성)
+export async function mount(container, { grade, cert, examId, mode }) {
+  unmount();
   const ctx = { grade, cert, id: examId };
+  const isView = mode === 'view';
   container.innerHTML = '';
 
-  const root = el('div', 'solve');
+  const root = el('section', 'sv');
 
-  // ── 솔브바(sticky) ──
-  const bar = el('div', 'solve-bar');
-  const back = el('a', 'solve-back');
-  back.href = `#/cert/${encodeURIComponent(grade)}/${encodeURIComponent(cert)}`;
-  back.setAttribute('aria-label', `${cert} 상세로 돌아가기`);
-  back.append(el('span', 'solve-back-icon', '←'), el('span', 'solve-back-label', cert));
+  // ── 상단 툴바 ──
+  const topbar = el('div', 'sv-topbar');
+  topbar.append(el('div', 'sv-exam', examLabelFromId(examId)));
+  const topStatus = el('div', 'sv-top-status');
+  topbar.append(topStatus);
 
-  const examLabel = el('span', 'solve-examid', examId);
+  // ── 작업 영역(2분할) ──
+  const work = el('div', 'sv-work');
 
-  const progWrap = el('div', 'solve-progress');
-  const progText = el('span', 'solve-progress-text', '응답 0/0');
-  const progBar = el('div', 'solve-progressbar');
-  const progFill = el('div', 'solve-progressbar-fill');
-  progBar.append(progFill);
-  progWrap.append(progText, progBar);
+  // PDF 패널.
+  const pdfPane = el('div', 'sv-pdf');
+  const pdfBar = el('div', 'sv-pdf-bar');
+  const modeChip = el('span', 'sv-mode-chip');
+  const pdfCtrls = el('div', 'sv-pdf-ctrls');
+  pdfBar.append(modeChip, pdfCtrls);
+  const pdfBody = el('div', 'sv-pdf-body qsc');
+  pdfPane.append(pdfBar, pdfBody);
 
-  const elapsed = el('span', 'solve-elapsed', '경과 0:00');
-  const submitBtn = el('button', 'btn solve-submit', '제출·채점');
-  const status = el('span', 'solve-status');
-  bar.append(back, examLabel, progWrap, elapsed, submitBtn, status);
+  // OMR 패널.
+  const omrPane = el('aside', 'sv-omr');
+  const omrHead = el('div', 'sv-omr-head');
+  const omrBody = el('div', 'sv-omr-body qsc');
+  const omrFoot = el('div', 'sv-omr-foot');
+  omrPane.append(omrHead, omrBody, omrFoot);
 
-  // ── 본문 ──
-  const bodyEl = el('div', 'solve-body');
-  const viewerPane = el('div', 'solve-viewer');
-  const rail = el('div', 'solve-rail omr-rail');
-
-  // 도구 패널(우측 슬라이드 오버). 기본 닫힘.
-  const tool = el('aside', 'solve-tool');
-  tool.hidden = true;
-  const toolHead = el('div', 'solve-tool-head');
-  const toolTitle = el('span', 'solve-tool-title');
-  const toolChip = el('span', 'solve-tool-chip');
-  const toolClose = el('button', 'close solve-tool-close', '✕');
-  toolClose.setAttribute('aria-label', '도구 패널 닫기');
-  toolHead.append(toolTitle, toolChip, toolClose);
-  const toolBody = el('div', 'solve-tool-body');
-  tool.append(toolHead, toolBody);
-
-  bodyEl.append(viewerPane, rail, tool);
-
-  // ── 결과 영역 ──
-  const result = el('div', 'result-area');
-  result.id = 'result';
-
-  root.append(bar, bodyEl, result);
+  work.append(pdfPane, omrPane);
+  root.append(topbar, work);
   container.append(root);
 
-  // 정리 대상 등록. self = 이 마운트의 토큰(빠른 재마운트 시 낡은 async 결과 폐기용).
-  active = { keydown: null, timer: null, omrCtrl: null, tool, toolBody };
+  active = { keydown: null, timer: null, omrCtrl: null, viewer: null };
   const self = active;
 
-  const fmtElapsed = (ms) => {
-    const s = Math.floor(ms / 1000);
-    return `경과 ${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
-  };
-
-  // ── 도구 패널 제어 ──
-  // 도구 오픈 세대 토큰: 개념/챗 오픈마다 증가. 비동기 컨텍스트 fetch 가 늦게 도착해도
-  // 그 사이 다른 도구가 열렸으면(gen 불일치) 폐기해 패널 덮어쓰기 레이스를 막는다.
-  let toolGen = 0;
-  function openTool(kind, qno) {
-    if (qno == null) return;
-    const gen = ++toolGen;
-    closeConcept(); // 이전 개념 패널의 fs-change 자동 새로고침 해제
-    toolBody.innerHTML = '';
-    toolChip.textContent = `#${qno} · ${examId}`;
-    tool.hidden = false;
-    tool.classList.add('open');
-    if (kind === 'concept') {
-      toolTitle.textContent = '개념·풀이';
-      renderConcept(toolBody, examId, qno);
-    } else {
-      toolTitle.textContent = '문항 챗';
-      toolBody.append(el('p', 'solve-tool-loading', '컨텍스트 준비 중…'));
-      buildContextText({ grade, cert, examId, qno }).then((contextText) => {
-        // 준비 도중 패널이 닫혔거나 언마운트/재마운트되거나 다른 도구가 열렸으면 무시.
-        if (active !== self || tool.hidden || gen !== toolGen) return;
-        toolBody.innerHTML = '';
-        renderChat(toolBody, { grade, cert, examId, qno, contextText });
-      });
-    }
-  }
-  function openConcept(qno) {
-    openTool('concept', qno);
-  }
-  function openChat(qno) {
-    openTool('chat', qno);
-  }
-  function closeTool() {
-    closeConcept();
-    tool.classList.remove('open');
-    tool.hidden = true;
-    toolBody.innerHTML = '';
-  }
-  toolClose.addEventListener('click', closeTool);
-
-  // 결과 퍼널(오답 개념/챗) → 도구 패널 열기.
-  configureResult({ openConcept, openChat });
-
   // ── PDF 뷰어 ──
-  renderViewer(viewerPane, ctx).catch((e) => {
-    viewerPane.innerHTML = '';
-    viewerPane.append(el('p', 'error-text', `PDF 표시 실패: ${e.message}`));
-  });
-
-  // ── OMR 레일 + 컨트롤러 ──
-  let omrCtrl = null;
-  let omrLoadFailed = false; // renderOmr 예외(로드 실패)와 정답 미등록(등록:false)을 구분.
-  try {
-    omrCtrl = await renderOmr(rail, {
-      grade,
-      cert,
-      id: examId,
-      onProgress: (done, total) => {
-        progText.textContent = `응답 ${done}/${total}`;
-        const pct = total > 0 ? Math.round((done / total) * 100) : 0;
-        progFill.style.width = `${pct}%`;
-      },
-      onConcept: openConcept,
-      onChat: openChat,
-    });
-  } catch (e) {
-    omrLoadFailed = true;
-    rail.innerHTML = '';
-    rail.append(el('p', 'error-text', `OMR 로드 실패: ${e.message}`));
-  }
-  // 언마운트/재마운트가 await 사이에 발생했으면 이 마운트는 무효 — 중단.
-  if (active !== self) return;
-  active.omrCtrl = omrCtrl;
-
-  if (omrLoadFailed) {
-    // OMR 로드가 예외로 실패 — 미등록(채점 불가)과 구분해 새로고침을 안내.
-    submitBtn.disabled = true;
-    submitBtn.textContent = 'OMR 로드 실패';
-    submitBtn.title = 'OMR 로드 실패 — 새로고침 후 재시도';
-  } else if (!omrCtrl || !omrCtrl.등록) {
-    // 정답 미등록(채점 불가) → 제출 비활성. 뷰어·열람은 정상.
-    submitBtn.disabled = true;
-    submitBtn.textContent = '채점 불가';
-    submitBtn.title = '정답 미등록 기출 — 열람만 가능';
-  } else {
-    // 경과시간 라이브 표시(솔브바). 소요시간 계산은 omr controller 소유.
-    elapsed.textContent = fmtElapsed(omrCtrl.getElapsedMs());
-    const timer = setInterval(() => {
-      if (active !== self || !elapsed.isConnected) {
-        clearInterval(timer);
+  const zoomLabel = iconBtn('100%', '100%로 맞추기', null, 'sv-zoom-label');
+  createViewer(pdfBody, ctx, { mode: isView ? 'view' : 'solve' })
+    .then((viewer) => {
+      if (active !== self) {
+        viewer.destroy();
         return;
       }
-      elapsed.textContent = fmtElapsed(omrCtrl.getElapsedMs());
-    }, 1000);
-    active.timer = timer;
+      active.viewer = viewer;
+      // 컨트롤 구성.
+      pdfCtrls.innerHTML = '';
+      const zoomOut = iconBtn(
+        '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M3.5 8h9"></path></svg>',
+        '축소',
+        () => viewer.zoomOut()
+      );
+      const zoomIn = iconBtn(
+        '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M8 3.5v9M3.5 8h9"></path></svg>',
+        '확대',
+        () => viewer.zoomIn()
+      );
+      zoomLabel.addEventListener('click', () => viewer.zoomReset());
+      const sep = el('span', 'sv-pdf-sep');
+      const prev = iconBtn(
+        '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M10 3L5 8l5 5"></path></svg>',
+        '이전 페이지',
+        () => viewer.prev()
+      );
+      const pageLabel = el('span', 'sv-page-label', '1 / 1');
+      const next = iconBtn(
+        '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3l5 5-5 5"></path></svg>',
+        '다음 페이지',
+        () => viewer.next()
+      );
+      pdfCtrls.append(zoomOut, zoomLabel, zoomIn, sep, prev, pageLabel, next);
 
-    submitBtn.addEventListener('click', async () => {
-      status.className = 'solve-status';
-      status.textContent = '';
-      submitBtn.disabled = true;
-      try {
-        const data = await omrCtrl.submit(); // qnet:attempt-submitted 발행 → result.js가 #result 렌더·스크롤
-        status.className = 'solve-status ok';
-        status.textContent = `채점 완료 — 총점 ${data.총점 ?? '?'} (${data.합격여부 ?? ''})`;
-        window.dispatchEvent(
-          new CustomEvent('qnet:toast', { detail: { message: '채점 완료 — 결과를 확인하세요.', type: 'ok' } })
-        );
-      } catch (e) {
-        status.className = 'solve-status error-text';
-        status.textContent = e.message;
-        window.dispatchEvent(
-          new CustomEvent('qnet:toast', { detail: { message: `제출 실패: ${e.message}`, type: 'error' } })
-        );
-      } finally {
-        submitBtn.disabled = false;
-      }
+      viewer.onChange(({ page, numPages, zoom, usedFull }) => {
+        zoomLabel.textContent = `${Math.round(zoom * 100)}%`;
+        pageLabel.textContent = `${page} / ${numPages}`;
+        // 모드 칩.
+        if (isView) {
+          if (usedFull) {
+            modeChip.className = 'sv-mode-chip warn';
+            modeChip.innerHTML =
+              '<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M1.5 8S3.7 3.5 8 3.5 14.5 8 14.5 8 12.3 12.5 8 12.5 1.5 8 1.5 8z"></path><circle cx="8" cy="8" r="2"></circle></svg>원본 · 정답 포함';
+          } else {
+            modeChip.className = 'sv-mode-chip neutral';
+            modeChip.textContent = '문항 서브셋 (원본은 제출 후)';
+          }
+        } else {
+          modeChip.className = 'sv-mode-chip ok';
+          modeChip.innerHTML =
+            '<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="var(--success)" stroke-width="1.5" stroke-linecap="round"><path d="M3 8.5l3 3 7-8"></path></svg>답지 제거 서브셋';
+        }
+      });
+    })
+    .catch((e) => {
+      pdfBody.innerHTML = '';
+      pdfBody.append(el('p', 'error-text', `PDF 표시 실패: ${e.message}`));
     });
-  }
 
-  // ── 키보드(전역 keydown; 입력 포커스 시 비활성) ──
+  // ── OMR / 정답표 ──
+  const openConcept = (qno) => openPanel({ grade, cert, examId }, qno, 'concept');
+  const openChat = (qno) => openPanel({ grade, cert, examId }, qno, 'chat');
+
+  if (isView) {
+    await mountViewMode();
+  } else {
+    await mountSolveMode();
+  }
+  if (active !== self) return;
+
+  // ── 키보드(입력 포커스 시 비활성) ──
   const onKey = (e) => {
     if (!active) return;
     if (isTypingTarget(e.target)) return;
     if (e.metaKey || e.ctrlKey || e.altKey) return;
-    // 등록된 컨트롤러만 키보드 대상(미등록 stub 은 채점 메서드가 없으므로 제외).
     const c = active.omrCtrl && active.omrCtrl.등록 ? active.omrCtrl : null;
     const code = e.code;
-
     if (code === 'Escape') {
-      if (!tool.hidden) {
-        closeTool();
-        e.preventDefault();
-      }
+      closePanel();
       return;
     }
-    if (
-      code === 'Digit1' || code === 'Digit2' || code === 'Digit3' || code === 'Digit4' ||
-      code === 'Numpad1' || code === 'Numpad2' || code === 'Numpad3' || code === 'Numpad4'
-    ) {
-      if (c && c.current != null) {
+    if (!c) return;
+    if (/^(Digit|Numpad)[1-4]$/.test(code)) {
+      if (c.current != null) {
         c.setOption(c.current, Number(code.slice(-1)));
         e.preventDefault();
       }
-      return;
-    }
-    if (code === 'KeyG') {
-      if (c && c.current != null) {
+    } else if (code === 'KeyG') {
+      if (c.current != null) {
         c.toggleMark(c.current);
         e.preventDefault();
       }
-      return;
-    }
-    if (code === 'ArrowUp') {
-      if (c) {
-        c.moveCurrent(-1);
-        e.preventDefault();
-      }
-      return;
-    }
-    if (code === 'ArrowDown') {
-      if (c) {
-        c.moveCurrent(1);
-        e.preventDefault();
-      }
-      return;
-    }
-    if (code === 'KeyC') {
-      if (c && c.current != null) {
+    } else if (code === 'ArrowUp') {
+      c.moveCurrent(-1);
+      e.preventDefault();
+    } else if (code === 'ArrowDown') {
+      c.moveCurrent(1);
+      e.preventDefault();
+    } else if (code === 'KeyC') {
+      if (c.current != null) {
         openConcept(c.current);
         e.preventDefault();
       }
-      return;
-    }
-    if (code === 'Slash') {
-      if (c && c.current != null) {
+    } else if (code === 'Slash') {
+      if (c.current != null) {
         openChat(c.current);
         e.preventDefault();
       }
@@ -305,15 +203,170 @@ export async function mount(container, { grade, cert, examId }) {
   };
   window.addEventListener('keydown', onKey);
   active.keydown = onKey;
+
+  // ── solve 모드 ──
+  async function mountSolveMode() {
+    // 상단 상태.
+    topStatus.innerHTML = '';
+    const timer = el('span', 'sv-timer');
+    timer.append(
+      icon(
+        '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><circle cx="8" cy="8" r="6.5"></circle><path d="M8 4.5V8l2.5 1.5"></path></svg>'
+      ),
+      (() => {
+        const t = el('span', 'sv-timer-val');
+        t.textContent = '0:00';
+        return t;
+      })()
+    );
+    const freeMode = el('span', 'sv-free', '· 자유 모드');
+    const saved = el('span', 'sv-saved');
+    saved.append(
+      icon(
+        '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8.5l3.5 3.5 6.5-8"></path></svg>'
+      ),
+      document.createTextNode('임시저장됨')
+    );
+    topStatus.append(timer, freeMode, saved);
+    const timerVal = timer.querySelector('.sv-timer-val');
+
+    // OMR 헤더(진행률) 슬롯.
+    omrHead.innerHTML = '';
+    const headTop = el('div', 'sv-omr-headtop');
+    headTop.append(el('div', 'sv-omr-title', 'OMR 답안지'));
+    const counter = el('div', 'sv-omr-counter', '0 / 0');
+    headTop.append(counter);
+    const progressTrack = el('div', 'sv-omr-progress');
+    const progressFill = el('div', 'sv-omr-progress-fill');
+    progressTrack.append(progressFill);
+    omrHead.append(headTop, progressTrack);
+
+    let omrCtrl = null;
+    let loadFailed = false;
+    try {
+      omrCtrl = await renderOmr(omrBody, {
+        grade,
+        cert,
+        id: examId,
+        onProgress: (done, total, guessed) => {
+          counter.innerHTML = `<b>${done}</b> / ${total} · 찍음 ${guessed || 0}`;
+          progressFill.style.width = total > 0 ? `${Math.round((done / total) * 100)}%` : '0%';
+        },
+        onConcept: openConcept,
+        onChat: openChat,
+      });
+    } catch (e) {
+      loadFailed = true;
+      omrBody.innerHTML = '';
+      omrBody.append(el('p', 'error-text', `OMR 로드 실패: ${e.message}`));
+    }
+    if (active !== self) return;
+    active.omrCtrl = omrCtrl;
+
+    // 푸터.
+    omrFoot.innerHTML = '';
+    if (loadFailed) {
+      const b = el('button', 'sv-submit', 'OMR 로드 실패');
+      b.disabled = true;
+      omrFoot.append(b);
+    } else if (!omrCtrl || !omrCtrl.등록) {
+      // 열람만(정답 미등록).
+      omrHead.innerHTML = '';
+      omrHead.append(headReadonlyOnly());
+      const notice = el('div', 'sv-omr-notice');
+      notice.append(
+        icon(
+          '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="var(--fg-3)" stroke-width="1.5" stroke-linecap="round"><circle cx="8" cy="8" r="6.5"></circle><path d="M8 5v3.5M8 11h.01"></path></svg>'
+        )
+      );
+      const nt = el('span');
+      nt.innerHTML = '<b>정답 미등록 — 채점 불가</b><br>이 기출은 열람만 가능해요. PDF를 참고해 학습하고, 정답을 등록하면 OMR이 활성화됩니다.';
+      notice.append(nt);
+      omrBody.innerHTML = '';
+      omrBody.append(notice);
+      const b = el('button', 'sv-submit disabled', '채점 불가 — 정답 미등록');
+      b.disabled = true;
+      omrFoot.append(b);
+    } else {
+      // 경과시간 라이브.
+      const fmt = (ms) => {
+        const s = Math.floor(ms / 1000);
+        return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+      };
+      timerVal.textContent = fmt(omrCtrl.getElapsedMs());
+      active.timer = setInterval(() => {
+        if (active !== self || !timerVal.isConnected) {
+          clearInterval(active.timer);
+          return;
+        }
+        timerVal.textContent = fmt(omrCtrl.getElapsedMs());
+      }, 1000);
+
+      const submit = el('button', 'sv-submit', '제출하고 채점하기');
+      submit.type = 'button';
+      submit.addEventListener('click', async () => {
+        submit.disabled = true;
+        submit.textContent = '채점 중…';
+        try {
+          const data = await omrCtrl.submit();
+          setLastResult(data);
+          location.hash = resultHash(grade, cert, examId);
+        } catch (e) {
+          submit.disabled = false;
+          submit.textContent = '제출하고 채점하기';
+          window.dispatchEvent(new CustomEvent('qnet:toast', { detail: { message: `제출 실패: ${e.message}`, type: 'error' } }));
+        }
+      });
+      omrFoot.append(submit);
+    }
+  }
+
+  function headReadonlyOnly() {
+    const headTop = el('div', 'sv-omr-headtop');
+    headTop.append(el('div', 'sv-omr-title', 'OMR 답안지'));
+    headTop.append(el('div', 'sv-omr-sub', '열람만'));
+    return headTop;
+  }
+
+  // ── view 모드(정답표) ──
+  async function mountViewMode() {
+    topStatus.innerHTML = '';
+    const chip = el('span', 'sv-view-chip', '정답 포함 열람');
+    const hint = el('span', 'sv-view-hint', '채점 없이 정답만 확인하는 모드예요');
+    topStatus.append(chip, hint);
+
+    omrHead.innerHTML = '';
+    const headTop = el('div', 'sv-omr-headtop');
+    const title = el('div', 'sv-omr-title');
+    title.append(document.createTextNode('정답표'), el('span', 'sv-omr-ro', '읽기 전용'));
+    headTop.append(title, el('div', 'sv-omr-sub', ''));
+    omrHead.append(headTop);
+
+    const res = await renderAnswerTable(omrBody, { grade, cert, id: examId });
+    if (active !== self) return;
+    headTop.querySelector('.sv-omr-sub').textContent = res.등록 ? `전체 ${res.문항수}문항` : '';
+
+    omrFoot.innerHTML = '';
+    const toTake = el('button', 'sv-submit', '시험치기로 전환');
+    toTake.type = 'button';
+    toTake.addEventListener('click', () => {
+      location.hash = solveHash(grade, cert, examId);
+    });
+    const toList = el('button', 'sv-omr-list', '목록');
+    toList.type = 'button';
+    toList.addEventListener('click', () => {
+      location.hash = certHash(grade, cert);
+    });
+    omrFoot.append(toTake, toList);
+  }
 }
 
 export function unmount() {
   if (!active) return;
   if (active.keydown) window.removeEventListener('keydown', active.keydown);
   if (active.timer) clearInterval(active.timer);
-  // 미등록 OMR 컨트롤러가 등록한 fs-change 리스너 정리(누수 방지).
   if (active.omrCtrl && typeof active.omrCtrl.unmount === 'function') active.omrCtrl.unmount();
-  closeConcept(); // 개념 패널 fs-change 자동 새로고침 해제
-  configureResult(null); // 결과 퍼널 핸들러 해제(제거된 DOM 참조 방지)
+  if (active.viewer && typeof active.viewer.destroy === 'function') active.viewer.destroy();
+  closePanel();
   active = null;
 }

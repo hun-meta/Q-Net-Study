@@ -1,26 +1,30 @@
-// 해시 라우터: 경로 매칭 · 뷰 lazy import · 마운트/언마운트 · 사이드바 렌더/하이라이트 · 풀이 자동 접힘.
-//   #/                              → 온보딩(닉네임 미설정) 또는 대시보드
-//   #/cert/{분야}/{자격증}           → 자격증 상세
-//   #/solve/{분야}/{자격증}/{시험ID}  → 풀이(몰입 모드; 사이드바 자동 접힘)
-// 세그먼트는 encodeURIComponent 로 인코딩한다. 뷰 계약: mount(container, params) / unmount().
+// 해시 라우터: 경로 매칭 · 뷰 lazy import · 마운트/언마운트 · 브레드크럼 · 헤더 노출.
+//   #/                                  → 온보딩(닉네임 미설정) 또는 홈(대시보드)
+//   #/cert/{분야}/{자격증}               → 기출 목록(examlist)
+//   #/cert/{분야}/{자격증}/trend         → 자격증 성적 추이(certTrend)
+//   #/solve/{분야}/{자격증}/{시험ID}      → 풀이(시험치기)
+//   #/view/{분야}/{자격증}/{시험ID}       → 풀이(답 포함 열람)
+//   #/result/{분야}/{자격증}/{시험ID}     → 채점 결과
+//   #/trend/{분야}/{자격증}/{시험ID}      → 시도 추이
+// 세그먼트는 encodeURIComponent. 뷰 계약: mount(container, params) / unmount().
 
 import { getState } from './store.js';
 
-const OPEN_REGISTER_KEY = 'qnet-open-register';
-
-// 뷰 모듈 lazy 로더(코드 스플리팅 + 순환참조 회피).
+// 뷰 모듈 lazy 로더(코드 스플리팅 + 순환참조 회피). 파일명은 기존 유지(내용은 디자인으로 개편).
 const VIEWS = {
   onboarding: () => import('./views/onboarding.js'),
-  dashboard: () => import('./views/dashboard.js'),
-  certDetail: () => import('./views/certDetail.js'),
-  solve: () => import('./views/solve.js'), // 에이전트 E 제공(같은 mount/unmount 계약)
+  home: () => import('./views/dashboard.js'),
+  examlist: () => import('./views/certDetail.js'),
+  solve: () => import('./views/solve.js'),
+  result: () => import('./views/result.js'),
+  trend: () => import('./views/trend.js'),
+  certTrend: () => import('./views/certTrend.js'),
 };
 
-let currentView = null; // 마운트된 뷰 모듈(unmount 보유)
+let currentView = null;
 let currentRoute = null;
 let routing = false;
 let pending = false;
-let sidebarCerts = null; // /api/repo certs 캐시
 
 function el(tag, cls, text) {
   const node = document.createElement(tag);
@@ -30,7 +34,6 @@ function el(tag, cls, text) {
 }
 
 const appEl = () => document.getElementById('app');
-const sidebarEl = () => document.getElementById('sidebar');
 
 // ── 해시 파싱/조립 ───────────────────────────────────────────────────────────
 function parseHash() {
@@ -55,32 +58,101 @@ export function navigate(hash) {
 export function certHash(grade, cert) {
   return `#/cert/${encodeURIComponent(grade)}/${encodeURIComponent(cert)}`;
 }
-
+export function certTrendHash(grade, cert) {
+  return `#/cert/${encodeURIComponent(grade)}/${encodeURIComponent(cert)}/trend`;
+}
 export function solveHash(grade, cert, examId) {
   return `#/solve/${encodeURIComponent(grade)}/${encodeURIComponent(cert)}/${encodeURIComponent(examId)}`;
 }
-
-function resolveRoute(segs) {
-  if (segs[0] === 'cert' && segs[1] && segs[2]) {
-    return { name: 'certDetail', params: { grade: segs[1], cert: segs[2] }, cert: { grade: segs[1], cert: segs[2] }, solve: false };
-  }
-  if (segs[0] === 'solve' && segs[1] && segs[2] && segs[3]) {
-    return {
-      name: 'solve',
-      params: { grade: segs[1], cert: segs[2], examId: segs[3] },
-      cert: { grade: segs[1], cert: segs[2] },
-      solve: true,
-    };
-  }
-  const { nickname } = getState();
-  return { name: nickname ? 'dashboard' : 'onboarding', params: {}, cert: null, solve: false };
+export function viewHash(grade, cert, examId) {
+  return `#/view/${encodeURIComponent(grade)}/${encodeURIComponent(cert)}/${encodeURIComponent(examId)}`;
+}
+export function resultHash(grade, cert, examId) {
+  return `#/result/${encodeURIComponent(grade)}/${encodeURIComponent(cert)}/${encodeURIComponent(examId)}`;
+}
+export function trendHash(grade, cert, examId) {
+  return `#/trend/${encodeURIComponent(grade)}/${encodeURIComponent(cert)}/${encodeURIComponent(examId)}`;
 }
 
-// ── 사이드바 상태(풀이 자동 접힘) ────────────────────────────────────────────
-function applySidebarState(route) {
-  const body = document.body;
-  body.classList.toggle('route-solve', !!route.solve);
-  body.classList.remove('sidebar-open'); // 라우트 전환 시 열림 상태 초기화(풀이는 접힘 시작)
+function resolveRoute(segs) {
+  const cert = (g, c) => ({ grade: g, cert: c });
+  if (segs[0] === 'cert' && segs[1] && segs[2] && segs[3] === 'trend') {
+    return { name: 'certTrend', params: { grade: segs[1], cert: segs[2] }, cert: cert(segs[1], segs[2]) };
+  }
+  if (segs[0] === 'cert' && segs[1] && segs[2]) {
+    return { name: 'examlist', params: { grade: segs[1], cert: segs[2] }, cert: cert(segs[1], segs[2]) };
+  }
+  if ((segs[0] === 'solve' || segs[0] === 'view') && segs[1] && segs[2] && segs[3]) {
+    return {
+      name: 'solve',
+      params: { grade: segs[1], cert: segs[2], examId: segs[3], mode: segs[0] === 'view' ? 'view' : 'solve' },
+      cert: cert(segs[1], segs[2]),
+    };
+  }
+  if (segs[0] === 'result' && segs[1] && segs[2] && segs[3]) {
+    return { name: 'result', params: { grade: segs[1], cert: segs[2], examId: segs[3] }, cert: cert(segs[1], segs[2]) };
+  }
+  if (segs[0] === 'trend' && segs[1] && segs[2] && segs[3]) {
+    return { name: 'trend', params: { grade: segs[1], cert: segs[2], examId: segs[3] }, cert: cert(segs[1], segs[2]) };
+  }
+  const { nickname } = getState();
+  return { name: nickname ? 'home' : 'onboarding', params: {}, cert: null };
+}
+
+// ── 브레드크럼 · 헤더 노출 ───────────────────────────────────────────────────
+function crumbSep() {
+  const s = el('span', 'crumb-sep');
+  s.innerHTML =
+    '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M6 3l5 5-5 5"></path></svg>';
+  return s;
+}
+
+function buildCrumbs(route) {
+  const root = { label: 'Q-Net 기출', hash: '#/' };
+  const c = route.cert;
+  const certLink = c ? { label: c.cert, hash: certHash(c.grade, c.cert) } : null;
+  switch (route.name) {
+    case 'home':
+      return [{ label: 'Q-Net 기출', current: true }];
+    case 'examlist':
+      return [root, { label: c ? c.cert : '자격증', current: true }];
+    case 'certTrend':
+      return [root, certLink, { label: '성적 추이', current: true }];
+    case 'solve':
+      return [root, certLink, { label: route.params.mode === 'view' ? '답 포함 열람' : '풀이', current: true }];
+    case 'result':
+      return [root, certLink, { label: '채점 결과', current: true }];
+    case 'trend':
+      return [root, certLink, { label: '시도 추이', current: true }];
+    default:
+      return [{ label: 'Q-Net 기출', current: true }];
+  }
+}
+
+function renderBreadcrumb(route) {
+  const nav = document.getElementById('breadcrumb');
+  if (!nav) return;
+  nav.innerHTML = '';
+  const crumbs = buildCrumbs(route).filter(Boolean);
+  crumbs.forEach((cr, i) => {
+    if (i > 0) nav.append(crumbSep());
+    if (cr.current || !cr.hash) {
+      nav.append(el('span', 'crumb-current', cr.label));
+    } else {
+      const a = el('a', 'crumb-link', cr.label);
+      a.href = cr.hash;
+      nav.append(a);
+    }
+  });
+}
+
+function updateHeader(route) {
+  const header = document.getElementById('app-header');
+  const showHeader = route.name !== 'onboarding';
+  if (header) header.hidden = !showHeader;
+  document.body.classList.toggle('route-onboarding', route.name === 'onboarding');
+  document.body.classList.toggle('route-solve', route.name === 'solve');
+  if (showHeader) renderBreadcrumb(route);
 }
 
 // ── 렌더 파이프라인 ──────────────────────────────────────────────────────────
@@ -94,7 +166,6 @@ async function render() {
   const route = resolveRoute(parseHash());
   currentRoute = route;
 
-  // 이전 뷰 언마운트.
   if (currentView && typeof currentView.unmount === 'function') {
     try {
       currentView.unmount();
@@ -106,13 +177,10 @@ async function render() {
 
   const container = appEl();
   container.innerHTML = '';
-
-  applySidebarState(route);
-  renderSidebar(route); // 비동기(대기하지 않음 — 본문 마운트를 막지 않음)
+  updateHeader(route);
 
   try {
     const mod = await VIEWS[route.name]();
-    // 라우트가 그새 바뀌었으면 이 마운트는 폐기.
     if (currentRoute !== route) {
       routing = false;
       if (pending) {
@@ -130,7 +198,7 @@ async function render() {
       container.innerHTML = '';
       const box = el('div', 'route-error');
       box.append(el('p', 'error-text', `화면을 불러오지 못했습니다: ${err && err.message ? err.message : err}`));
-      const home = el('button', 'btn sm', '대시보드로');
+      const home = el('button', 'btn sm', '홈으로');
       home.type = 'button';
       home.addEventListener('click', () => {
         location.hash = '#/';
@@ -147,93 +215,10 @@ async function render() {
   }
 }
 
-// ── 사이드바 ─────────────────────────────────────────────────────────────────
-async function fetchCerts() {
-  if (sidebarCerts) return sidebarCerts;
-  try {
-    const res = await fetch('/api/repo');
-    const data = res.ok ? await res.json() : { certs: [] };
-    sidebarCerts = data.certs || [];
-  } catch (_e) {
-    sidebarCerts = [];
-  }
-  return sidebarCerts;
-}
-
-async function renderSidebar(route) {
-  const host = sidebarEl();
-  if (!host) return;
-  const certs = await fetchCerts();
-  // 렌더 중 라우트가 바뀌었으면 최신 라우트 기준으로.
-  const active = (currentRoute && currentRoute.cert) || (route && route.cert) || null;
-
-  host.innerHTML = '';
-  const nav = el('nav', 'sidebar-nav');
-  nav.setAttribute('aria-label', '자격증');
-
-  const home = el('a', 'sidebar-home', '홈');
-  home.href = '#/';
-  nav.append(home);
-
-  // 분야(grade)로 그룹핑.
-  const groups = new Map();
-  for (const c of certs) {
-    if (!groups.has(c.grade)) groups.set(c.grade, []);
-    groups.get(c.grade).push(c);
-  }
-  const sortedGrades = [...groups.keys()].sort((a, b) => String(a).localeCompare(String(b), 'ko'));
-
-  for (const grade of sortedGrades) {
-    const group = el('div', 'sidebar-group');
-    group.append(el('div', 'sidebar-group-title', grade));
-    const list = el('ul', 'sidebar-list');
-    const items = groups.get(grade).slice().sort((a, b) => String(a.cert).localeCompare(String(b.cert), 'ko'));
-    for (const c of items) {
-      const li = el('li');
-      const link = el('a', 'sidebar-link', c.cert);
-      link.href = certHash(c.grade, c.cert);
-      if (active && active.grade === c.grade && active.cert === c.cert) {
-        link.classList.add('active');
-        link.setAttribute('aria-current', 'page');
-      }
-      li.append(link);
-      list.append(li);
-    }
-    group.append(list);
-    nav.append(group);
-  }
-
-  if (certs.length === 0) {
-    nav.append(el('p', 'muted sidebar-empty', '등록된 자격증이 없습니다.'));
-  }
-
-  // ＋ 자격증 등록: 대시보드 등록 폼을 자동 오픈하며 이동.
-  const addBtn = el('button', 'sidebar-add', '＋ 자격증 등록');
-  addBtn.type = 'button';
-  addBtn.addEventListener('click', () => {
-    try {
-      sessionStorage.setItem(OPEN_REGISTER_KEY, '1');
-    } catch (_e) {
-      /* 무시 — 미러 플래그 없이도 대시보드는 열린다 */
-    }
-    location.hash = '#/';
-  });
-  nav.append(addBtn);
-
-  host.append(nav);
-}
-
-function refreshSidebar() {
-  sidebarCerts = null; // 캐시 무효화
-  renderSidebar(currentRoute || resolveRoute(parseHash()));
-}
-
 // ── 시작 ─────────────────────────────────────────────────────────────────────
 export function startRouter() {
   window.addEventListener('hashchange', render);
-  // 새 자격증 등록·정답 등록 등으로 목록이 바뀌면 사이드바 갱신.
-  window.addEventListener('qnet:fs-change', refreshSidebar);
-  // 닉네임 변경 시 홈 라우트 의미(온보딩↔대시보드)가 바뀔 수 있어 재렌더.
+  // 닉네임 변경 시 홈 라우트 의미(온보딩↔홈)·헤더가 바뀔 수 있어 홈에 있으면 재렌더.
   window.addEventListener('qnet:nickname-changed', () => {
     const hash = location.hash;
     if (hash === '' || hash === '#' || hash === '#/') render();

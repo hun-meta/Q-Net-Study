@@ -100,6 +100,39 @@ function parseIndex(content) {
 }
 
 /**
+ * attempt 문항들에서 추이용 지표 계산: X수(오답)·찍음수·O찍음수·확신정답률·찍음비율.
+ * (파싱된 문항 표에서 결정적으로 산출 — 웹 UI 추이 화면이 시도별로 소비)
+ */
+function attemptMetrics(문항들) {
+  let X = 0;
+  let 찍음 = 0;
+  let O찍음 = 0;
+  let 확신 = 0;
+  let 확신정답 = 0;
+  const items = 문항들 || [];
+  for (const q of items) {
+    const wrong = q.결과 === 'X';
+    const guess = q.확신도 === '찍음';
+    const sure = q.확신도 === '확신';
+    if (wrong) X += 1;
+    if (guess) 찍음 += 1;
+    if (guess && q.결과 === 'O') O찍음 += 1;
+    if (sure) {
+      확신 += 1;
+      if (q.결과 === 'O') 확신정답 += 1;
+    }
+  }
+  const 문항수 = items.length;
+  return {
+    X수: X,
+    찍음수: 찍음,
+    O찍음수: O찍음,
+    확신정답률: 확신 > 0 ? Math.round((확신정답 / 확신) * 100) : null,
+    찍음비율: 문항수 > 0 ? Math.round((찍음 / 문항수) * 100) : 0,
+  };
+}
+
+/**
  * 시도 추이 계산: 시험별로 시도 순 총점 배열.
  * @param rows INDEX 파싱 결과 또는 [{시험,시도,총점,결과}]
  * @returns { [시험]: [{ 시도, 총점, 결과 }] }
@@ -142,6 +175,7 @@ function listAttempts(attemptsDir) {
       풀이일: parsed.풀이일,
       총점: parsed.총점,
       합격여부: parsed.합격여부,
+      ...attemptMetrics(parsed.문항들),
     });
   }
   out.sort((a, b) => (a.시험 < b.시험 ? -1 : a.시험 > b.시험 ? 1 : (a.시도 || 0) - (b.시도 || 0)));

@@ -1,9 +1,9 @@
-// PDF 뷰어: pdfjs-dist 로컬 서빙(외부 CDN 금지)로 숨김 페이지 제거 서브셋을 렌더.
-// 답지는 서버 서브셋 단계에서 이미 제외되어 브라우저에 도달하지 않는다.
+// PDF 뷰어: pdfjs-dist 로컬 서빙. 페이지 단위 렌더 + 줌(60~200%) 컨트롤러.
+// solve 모드는 답지 제거 서브셋(/pdf), view(답 포함 열람) 모드는 원본(/pdf-full, 제출 있을 때만; 없으면 서브셋).
 
+const enc = encodeURIComponent;
 let pdfjsPromise = null;
 
-// pdf.js를 1회만 지연 로드하고 워커 경로를 로컬 vendor 라우트로 지정.
 function loadPdfjs() {
   if (!pdfjsPromise) {
     pdfjsPromise = import('/vendor/pdfjs/pdf.mjs').then((lib) => {
@@ -14,31 +14,64 @@ function loadPdfjs() {
   return pdfjsPromise;
 }
 
-export async function renderViewer(container, ctx) {
+// createViewer(container, ctx, opts) → controller.
+// ctx: { grade, cert, id }. opts: { mode:'solve'|'view' }.
+// controller: { numPages, usedFull, page(get), zoom(get), setPage, next, prev, zoomIn, zoomOut, zoomReset, onChange, destroy }
+export async function createViewer(container, ctx, opts) {
   const { grade, cert, id } = ctx;
-  container.innerHTML = '<p class="loading">PDF 불러오는 중…</p>';
+  const mode = (opts && opts.mode) || 'solve';
+  const q = `grade=${enc(grade)}&cert=${enc(cert)}`;
 
-  const q = `grade=${encodeURIComponent(grade)}&cert=${encodeURIComponent(cert)}`;
-  const res = await fetch(`/api/exams/${encodeURIComponent(id)}/pdf?${q}`);
-  if (!res.ok) {
-    const e = await res.json().catch(() => ({}));
-    throw new Error(e.error || `PDF 요청 실패 (${res.status})`);
+  container.innerHTML = '<p class="loading" style="padding:24px">PDF 불러오는 중…</p>';
+
+  // 바이트 로드. view 모드는 원본 우선(제출 없으면 403 → 서브셋 폴백).
+  let bytes = null;
+  let usedFull = false;
+  if (mode === 'view') {
+    try {
+      const rf = await fetch(`/api/exams/${enc(id)}/pdf-full?${q}`);
+      if (rf.ok) {
+        bytes = await rf.arrayBuffer();
+        usedFull = true;
+      }
+    } catch (_e) {
+      /* 폴백 진행 */
+    }
   }
-  const data = await res.arrayBuffer();
+  if (!bytes) {
+    const r = await fetch(`/api/exams/${enc(id)}/pdf?${q}`);
+    if (!r.ok) {
+      const e = await r.json().catch(() => ({}));
+      throw new Error(e.error || `PDF 요청 실패 (${r.status})`);
+    }
+    bytes = await r.arrayBuffer();
+  }
 
   const pdfjsLib = await loadPdfjs();
-  const pdf = await pdfjsLib.getDocument({ data }).promise;
+  const pdf = await pdfjsLib.getDocument({ data: bytes }).promise;
+  const numPages = pdf.numPages;
 
   container.innerHTML = '';
-  // 컨테이너 폭에 맞춰 배율 계산(과확대 방지 상한 2.0).
-  const avail = Math.max(320, container.clientWidth - 16);
+  const zoomWrap = document.createElement('div');
+  zoomWrap.className = 'pdf-zoom';
+  const pageWrap = document.createElement('div');
+  pageWrap.className = 'pdf-page';
+  zoomWrap.append(pageWrap);
+  container.append(zoomWrap);
 
-  for (let n = 1; n <= pdf.numPages; n += 1) {
-    // eslint-disable-next-line no-await-in-loop
+  let current = 1;
+  let zoom = 1;
+  let cb = null;
+  let renderToken = 0;
+
+  async function renderPage(n) {
+    const token = ++renderToken;
     const page = await pdf.getPage(n);
     const base = page.getViewport({ scale: 1 });
-    const scale = Math.min(2.0, avail / base.width);
+    const avail = Math.max(360, container.clientWidth - 52);
+    const scale = Math.min(2.2, avail / base.width);
     const viewport = page.getViewport({ scale });
+    if (token !== renderToken) return;
 
     const canvas = document.createElement('canvas');
     const dpr = window.devicePixelRatio || 1;
@@ -46,11 +79,72 @@ export async function renderViewer(container, ctx) {
     canvas.height = Math.floor(viewport.height * dpr);
     canvas.style.width = `${Math.floor(viewport.width)}px`;
     canvas.style.height = `${Math.floor(viewport.height)}px`;
-    const context = canvas.getContext('2d');
-    context.scale(dpr, dpr);
-    container.append(canvas);
-
-    // eslint-disable-next-line no-await-in-loop
-    await page.render({ canvasContext: context, viewport }).promise;
+    const cxt = canvas.getContext('2d');
+    cxt.scale(dpr, dpr);
+    await page.render({ canvasContext: cxt, viewport }).promise;
+    if (token !== renderToken) return;
+    pageWrap.innerHTML = '';
+    pageWrap.append(canvas);
+    container.scrollTop = 0;
   }
+
+  function notify() {
+    if (cb) cb({ page: current, numPages, zoom, usedFull });
+  }
+  function applyZoom() {
+    zoomWrap.style.zoom = String(zoom);
+    notify();
+  }
+
+  await renderPage(current);
+
+  const controller = {
+    numPages,
+    usedFull,
+    get page() {
+      return current;
+    },
+    get zoom() {
+      return zoom;
+    },
+    setPage(x) {
+      const t = Math.max(1, Math.min(numPages, x));
+      if (t !== current) {
+        current = t;
+        renderPage(current);
+        notify();
+      }
+    },
+    next() {
+      controller.setPage(current + 1);
+    },
+    prev() {
+      controller.setPage(current - 1);
+    },
+    zoomIn() {
+      zoom = Math.min(2, Math.round((zoom + 0.1) * 10) / 10);
+      applyZoom();
+    },
+    zoomOut() {
+      zoom = Math.max(0.6, Math.round((zoom - 0.1) * 10) / 10);
+      applyZoom();
+    },
+    zoomReset() {
+      zoom = 1;
+      applyZoom();
+    },
+    onChange(fn) {
+      cb = fn;
+      notify();
+    },
+    destroy() {
+      renderToken += 1;
+      try {
+        pdf.destroy();
+      } catch (_e) {
+        /* 무시 */
+      }
+    },
+  };
+  return controller;
 }

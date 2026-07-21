@@ -1,19 +1,26 @@
-// 대시보드(#/): 이어풀기 CTA + 내 현황 카드 + 자격증 카드 그리드 + 새 자격증 등록.
-// 대시보드 통계는 기존 API 병합(/api/repo + /api/exams + /api/attempts) + localStorage 드래프트 미러로 해결.
-// 뷰 인터페이스: export async function mount(container, params) / export function unmount().
+// 홈 대시보드(#/): "대시보드" 헤더 + 자격증 등록 + 종류(분야) 탭 + 자격증 카드 그리드.
+// 기존 기능(이어풀기 CTA)은 디자인에 맞춰 accent 카드로 유지한다.
+// 데이터: /api/repo(certs·participants) + 자격증별 /api/attempts(최근 점수) + 드래프트 미러.
+// 뷰 계약: mount(container, params) / unmount().
 
 import { apiFetch, listDraftMirrors, removeDraftMirror } from '../store.js';
 import { certHash, solveHash } from '../router.js';
 import { toast } from '../components/toast.js';
 
-// 사이드바의 "＋ 자격증 등록" 진입 시 등록 폼 자동 오픈용 플래그 키.
-const OPEN_REGISTER_KEY = 'qnet-open-register';
+const enc = encodeURIComponent;
 
 function el(tag, cls, text) {
   const node = document.createElement(tag);
   if (cls) node.className = cls;
   if (text != null) node.textContent = text;
   return node;
+}
+
+function svg(html) {
+  const s = document.createElement('span');
+  s.style.display = 'inline-flex';
+  s.innerHTML = html;
+  return s;
 }
 
 async function getJson(url) {
@@ -25,89 +32,89 @@ async function getJson(url) {
   return res.json();
 }
 
-// 인라인 SVG 스파크라인(총점 추이). 색은 CSS(.sparkline-path/.sparkline-dot)가 관장하되
-// 프리젠테이션 속성으로 최소 가시성을 보장한다(속성 < 클래스 규칙 우선순위).
-function sparkline(values) {
-  const NS = 'http://www.w3.org/2000/svg';
-  const w = 96;
-  const h = 28;
-  const pad = 3;
-  const svg = document.createElementNS(NS, 'svg');
-  svg.setAttribute('viewBox', `0 0 ${w} ${h}`);
-  svg.setAttribute('width', String(w));
-  svg.setAttribute('height', String(h));
-  svg.setAttribute('class', 'sparkline');
-  svg.setAttribute('role', 'img');
-  const nums = values.map(Number).filter((v) => Number.isFinite(v));
-  if (nums.length === 0) return svg;
-  svg.setAttribute('aria-label', `총점 추이 ${nums.map((n) => n.toFixed(0)).join(', ')}`);
-  const min = Math.min(...nums);
-  const max = Math.max(...nums);
-  const span = max - min || 1;
-  const stepX = nums.length > 1 ? (w - pad * 2) / (nums.length - 1) : 0;
-  const pts = nums.map((v, i) => [pad + i * stepX, h - pad - ((v - min) / span) * (h - pad * 2)]);
-  const d = pts.map((p, i) => `${i === 0 ? 'M' : 'L'}${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(' ');
-  const path = document.createElementNS(NS, 'path');
-  path.setAttribute('d', d);
-  path.setAttribute('class', 'sparkline-path');
-  path.setAttribute('fill', 'none');
-  path.setAttribute('stroke', 'currentColor');
-  path.setAttribute('stroke-width', '1.5');
-  path.setAttribute('stroke-linecap', 'round');
-  path.setAttribute('stroke-linejoin', 'round');
-  svg.append(path);
-  const last = pts[pts.length - 1];
-  const dot = document.createElementNS(NS, 'circle');
-  dot.setAttribute('cx', last[0].toFixed(1));
-  dot.setAttribute('cy', last[1].toFixed(1));
-  dot.setAttribute('r', '2');
-  dot.setAttribute('class', 'sparkline-dot');
-  dot.setAttribute('fill', 'currentColor');
-  svg.append(dot);
-  return svg;
+function judgeCls(judge) {
+  if (judge === '합격') return 'jw-pass';
+  if (judge === '과락') return 'jw-flunk';
+  if (judge === '불합격') return 'jw-fail';
+  return '';
 }
 
-// 현재 뷰 상태(정리·갱신용).
-const view = { container: null, onFsChange: null, alive: false };
+// 자격증별 최근 시도(점수·판정). /api/attempts 는 현재 닉네임 기준.
+async function latestAttempt(grade, cert) {
+  try {
+    const d = await getJson(`/api/attempts?grade=${enc(grade)}&cert=${enc(cert)}`);
+    const arr = d.attempts || [];
+    if (!arr.length) return null;
+    const sorted = arr.slice().sort((a, b) => {
+      const x = String(a.풀이일 || '').localeCompare(String(b.풀이일 || ''));
+      if (x !== 0) return x;
+      return (Number(a.시도) || 0) - (Number(b.시도) || 0);
+    });
+    const l = sorted[sorted.length - 1];
+    return { score: l.총점, judge: l.합격여부 };
+  } catch (_e) {
+    return null;
+  }
+}
+
+const view = { alive: false, onFs: null, activeGrade: null };
 
 export async function mount(container, _params) {
-  view.container = container;
   view.alive = true;
   container.innerHTML = '';
 
-  const page = el('section', 'dash');
-  const ctaSlot = el('div', 'dash-cta-slot');
-  const statusSlot = el('section', 'dash-status');
-  const gridSlot = el('section', 'dash-grid-wrap');
-  page.append(ctaSlot, statusSlot, gridSlot);
+  const page = el('section', 'home');
+
+  // 헤더.
+  const head = el('div', 'home-head');
+  const headL = el('div');
+  headL.append(
+    el('div', 'home-eyebrow', '대시보드'),
+    el('h1', 'home-title', '자격증 선택'),
+    el('p', 'home-desc', '종류를 고르고 자격증에 들어가 기출을 풀어보세요.')
+  );
+  const regBtn = el('button', 'home-reg-btn');
+  regBtn.type = 'button';
+  regBtn.append(
+    svg('<svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M8 3v10M3 8h10"></path></svg>'),
+    document.createTextNode('자격증 등록')
+  );
+  head.append(headL, regBtn);
+
+  const resumeSlot = el('div', 'home-resume-slot');
+  const tabsSlot = el('div', 'home-tabs-slot');
+  const gridSlot = el('div', 'home-grid-slot');
+
+  page.append(head, resumeSlot, tabsSlot, gridSlot);
   container.append(page);
 
-  // 스켈레톤 초기 표시.
-  statusSlot.append(skeletonStatus());
-  gridSlot.append(skeletonGrid());
+  // 스켈레톤.
+  const skel = el('div', 'home-grid');
+  for (let i = 0; i < 4; i += 1) skel.append(el('div', 'skeleton home-skel-card'));
+  gridSlot.append(skel);
 
-  await Promise.all([renderContinue(ctaSlot), renderData(statusSlot, gridSlot)]);
+  regBtn.addEventListener('click', () => openCertRegDialog(view.gradeNames || []));
 
-  // fs-change → 그리드/현황 갱신(무음). CTA는 미러 기반이라 재검증만.
-  view.onFsChange = () => {
+  await Promise.all([renderResume(resumeSlot), renderData(tabsSlot, gridSlot)]);
+
+  view.onFs = () => {
     if (!view.alive) return;
-    renderData(statusSlot, gridSlot);
-    renderContinue(ctaSlot);
+    renderData(tabsSlot, gridSlot);
+    renderResume(resumeSlot);
   };
-  window.addEventListener('qnet:fs-change', view.onFsChange);
+  window.addEventListener('qnet:fs-change', view.onFs);
 }
 
-// ── 이어풀기 CTA ─────────────────────────────────────────────────────────────
-async function renderContinue(slot) {
+// ── 이어풀기 ─────────────────────────────────────────────────────────────────
+async function renderResume(slot) {
   const mirrors = listDraftMirrors();
   slot.innerHTML = '';
   if (mirrors.length === 0) return;
 
-  // 서버 드래프트 존재 검증(불일치 미러는 정리). 최근 저장 순으로 첫 유효 항목을 CTA로.
   const checks = await Promise.all(
     mirrors.map(async (m) => {
       try {
-        const data = await getJson(`/api/draft/${encodeURIComponent(m.examId)}`);
+        const data = await getJson(`/api/draft/${enc(m.examId)}`);
         return { m, ok: !!(data && data.draft) };
       } catch (_e) {
         return { m, ok: false };
@@ -124,312 +131,214 @@ async function renderContinue(slot) {
   if (valid.length === 0) return;
 
   const top = valid[0];
-  const cta = el('button', 'btn dash-cta', null);
-  cta.type = 'button';
-  const progress = top.total ? ` (응답 ${top.done}/${top.total})` : '';
-  cta.append(
-    el('span', 'dash-cta-icon', '▶'),
-    el('span', 'dash-cta-label', `이어풀기 — ${top.examId}${progress}`),
-    el('span', 'dash-cta-cert', `${top.grade} / ${top.cert}`)
+  const btn = el('button', 'home-resume');
+  btn.type = 'button';
+  const main = el('div', 'home-resume-main');
+  const progress = top.total ? ` · 응답 ${top.done}/${top.total}` : '';
+  main.append(
+    el('div', 'home-resume-title', `이어풀기 — ${top.examId}${progress}`),
+    el('div', 'home-resume-sub', '이어서 답안을 마저 작성하고 제출할 수 있어요.')
   );
-  cta.addEventListener('click', () => {
+  btn.append(
+    (() => {
+      const i = el('span', 'home-resume-icon');
+      i.innerHTML = '<svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M5 3.5v9l7-4.5z"></path></svg>';
+      return i;
+    })(),
+    main,
+    el('span', 'home-resume-cert', `${top.grade} / ${top.cert}`)
+  );
+  btn.addEventListener('click', () => {
     location.hash = solveHash(top.grade, top.cert, top.examId);
   });
-  slot.append(cta);
-
-  if (valid.length > 1) {
-    const more = el('div', 'dash-cta-more');
-    for (const m of valid.slice(1)) {
-      const link = el('button', 'btn ghost sm', `${m.examId} (${m.cert})`);
-      link.type = 'button';
-      link.addEventListener('click', () => {
-        location.hash = solveHash(m.grade, m.cert, m.examId);
-      });
-      more.append(link);
-    }
-    slot.append(more);
-  }
+  slot.append(btn);
 }
 
-// ── 내 현황 + 자격증 그리드(데이터 병합) ─────────────────────────────────────
-async function renderData(statusSlot, gridSlot) {
+// ── 종류 탭 + 자격증 카드 ────────────────────────────────────────────────────
+async function renderData(tabsSlot, gridSlot) {
   let repo;
   try {
     repo = await getJson('/api/repo');
   } catch (e) {
-    statusSlot.innerHTML = '';
-    statusSlot.append(el('p', 'error-text', e.message));
+    tabsSlot.innerHTML = '';
     gridSlot.innerHTML = '';
-    gridSlot.append(registerCard([]));
+    gridSlot.append(el('p', 'error-text', e.message));
     return;
   }
   if (!view.alive) return;
-  const certs = repo.certs || [];
 
-  // 자격증별 기출/시도 병렬 조회.
-  const perCert = await Promise.all(
+  const certs = repo.certs || [];
+  // 종류(grade)별 그룹.
+  const groups = new Map();
+  for (const c of certs) {
+    if (!groups.has(c.grade)) groups.set(c.grade, []);
+    groups.get(c.grade).push(c);
+  }
+  const grades = [...groups.keys()].sort((a, b) => String(a).localeCompare(String(b), 'ko'));
+  view.gradeNames = grades;
+
+  if (!view.activeGrade || !groups.has(view.activeGrade)) {
+    view.activeGrade = grades[0] || null;
+  }
+
+  // 최근 점수 병렬 조회.
+  const lastMap = {};
+  await Promise.all(
     certs.map(async (c) => {
-      const [exams, attempts] = await Promise.all([
-        getJson(`/api/exams?grade=${encodeURIComponent(c.grade)}&cert=${encodeURIComponent(c.cert)}`)
-          .then((d) => d.exams || [])
-          .catch(() => []),
-        getJson(`/api/attempts?grade=${encodeURIComponent(c.grade)}&cert=${encodeURIComponent(c.cert)}`)
-          .then((d) => d.attempts || [])
-          .catch(() => []),
-      ]);
-      return { ...c, exams, attempts };
+      lastMap[`${c.grade}//${c.cert}`] = await latestAttempt(c.grade, c.cert);
     })
   );
   if (!view.alive) return;
 
-  renderStatus(statusSlot, perCert);
-  renderGrid(gridSlot, perCert, certs);
-}
-
-function renderStatus(slot, perCert) {
-  slot.innerHTML = '';
-  slot.append(el('h2', 'dash-section-title', '내 현황'));
-
-  const all = [];
-  for (const c of perCert) for (const a of c.attempts) all.push(a);
-
-  if (all.length === 0) {
-    const empty = el('div', 'dash-empty');
-    empty.append(
-      el('p', null, '아직 기록이 없습니다 — 첫 기출을 풀어보세요.'),
-      (() => {
-        const b = el('button', 'btn sm', '자격증 살펴보기');
-        b.type = 'button';
-        b.addEventListener('click', () => {
-          const grid = document.querySelector('.dash-grid-wrap');
-          if (grid) grid.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        });
-        return b;
-      })()
-    );
-    slot.append(empty);
+  // 탭.
+  tabsSlot.innerHTML = '';
+  const tabs = el('div', 'home-tabs');
+  if (grades.length === 0) {
+    // 자격증 없음 — 빈 상태 + 등록 유도.
+    gridSlot.innerHTML = '';
+    const empty = el('div', 'home-empty');
+    empty.append(el('p', null, '아직 등록된 자격증이 없어요. 우측 상단 “자격증 등록”으로 시작하세요.'));
+    gridSlot.append(empty);
     return;
   }
-
-  // 최신 시도(풀이일 → 시도 순).
-  const sorted = all.slice().sort((a, b) => {
-    const d = String(a.풀이일 || '').localeCompare(String(b.풀이일 || ''));
-    if (d !== 0) return d;
-    return (Number(a.시도) || 0) - (Number(b.시도) || 0);
-  });
-  const latest = sorted[sorted.length - 1];
-
-  // X 합계·찍음 합계: /api/attempts 목록에는 문항 단위 집계가 없다(서버 계약 고정).
-  // 항목에 값이 있으면 합산하고, 없으면 '—'로 표기한다(미제공을 0으로 위장하지 않음).
-  let xSum = 0;
-  let guessSum = 0;
-  let hasXData = false;
-  let hasGuessData = false;
-  for (const a of all) {
-    if (a.X수 != null) {
-      xSum += Number(a.X수) || 0;
-      hasXData = true;
-    }
-    if (a.O찍음수 != null || a.찍음수 != null) {
-      guessSum += Number(a.O찍음수 != null ? a.O찍음수 : a.찍음수) || 0;
-      hasGuessData = true;
-    }
+  for (const g of grades) {
+    const tab = el('button', 'home-tab' + (g === view.activeGrade ? ' active' : ''));
+    tab.type = 'button';
+    tab.append(document.createTextNode(g), el('span', 'home-tab-count', String(groups.get(g).length)));
+    tab.addEventListener('click', () => {
+      view.activeGrade = g;
+      renderData(tabsSlot, gridSlot);
+    });
+    tabs.append(tab);
   }
+  tabsSlot.append(tabs);
 
-  const grid = el('div', 'dash-stat-grid');
-
-  const scoreTile = el('div', 'dash-stat');
-  scoreTile.append(el('span', 'stat-label', '최근 점수'));
-  const scoreVal = el('span', 'stat-value', latest.총점 != null ? Number(latest.총점).toFixed(1) : '-');
-  scoreTile.append(scoreVal);
-  if (latest.합격여부) {
-    scoreTile.append(el('span', `badge ${latest.합격여부 === '합격' ? 'pass' : 'fail'}`, latest.합격여부));
+  // 카드 그리드.
+  gridSlot.innerHTML = '';
+  const grid = el('div', 'home-grid');
+  const items = groups.get(view.activeGrade).slice().sort((a, b) => String(a.cert).localeCompare(String(b.cert), 'ko'));
+  for (const c of items) {
+    grid.append(certCard(c, lastMap[`${c.grade}//${c.cert}`]));
   }
-  grid.append(scoreTile);
-
-  const xTile = el('div', 'dash-stat');
-  xTile.append(el('span', 'stat-label', '오답 X'));
-  xTile.append(el('span', 'stat-value', hasXData ? `${xSum}개` : '—'));
-  if (!hasXData) xTile.append(el('span', 'muted', '상세 미제공'));
-  grid.append(xTile);
-
-  const gTile = el('div', 'dash-stat');
-  gTile.append(el('span', 'stat-label', '찍음'));
-  gTile.append(el('span', 'stat-value', hasGuessData ? `${guessSum}개` : '—'));
-  if (!hasGuessData) gTile.append(el('span', 'muted', '상세 미제공'));
-  grid.append(gTile);
-
-  const trendTile = el('div', 'dash-stat');
-  trendTile.append(el('span', 'stat-label', '총점 추이'));
-  const scores = sorted.map((a) => a.총점).filter((v) => v != null);
-  if (scores.length >= 2) {
-    trendTile.append(sparkline(scores));
-  } else {
-    trendTile.append(el('span', 'stat-value', scores.length ? Number(scores[0]).toFixed(1) : '-'));
-    trendTile.append(el('span', 'muted', '2회 이상 시 추이'));
-  }
-  grid.append(trendTile);
-
-  slot.append(grid);
+  gridSlot.append(grid);
 }
 
-function renderGrid(slot, perCert, certs) {
-  slot.innerHTML = '';
-  slot.append(el('h2', 'dash-section-title', '자격증'));
-  const grid = el('div', 'dash-grid');
-
-  for (const c of perCert) {
-    grid.append(certCard(c));
-  }
-  grid.append(registerCard(certs));
-  slot.append(grid);
-}
-
-function certCard(c) {
-  const card = el('button', 'dash-card', null);
+function certCard(c, last) {
+  const card = el('button', 'home-card');
   card.type = 'button';
-  card.append(el('span', 'dash-card-title', c.cert));
-  card.append(el('span', 'dash-card-field', c.grade));
 
-  const 채점가능수 = c.exams.filter((e) => e.채점가능).length;
-  const stats = el('span', 'dash-card-stats', `기출 ${c.exams.length} · 채점가능 ${채점가능수}`);
-  card.append(stats);
+  const top = el('div', 'home-card-top');
+  const icon = el('span', 'home-card-icon');
+  icon.innerHTML =
+    '<svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 5.5A1.5 1.5 0 0 1 4.5 4H9l1.5 1.6h5A1.5 1.5 0 0 1 17 7v7.5A1.5 1.5 0 0 1 15.5 16h-11A1.5 1.5 0 0 1 3 14.5z"></path></svg>';
+  top.append(icon);
+  if (c.hasCommon) top.append(el('span', 'home-card-common', '_공통 있음'));
 
-  // 최근 시도(모든 시험 중 최신).
-  const sorted = c.attempts.slice().sort((a, b) => {
-    const d = String(a.풀이일 || '').localeCompare(String(b.풀이일 || ''));
-    if (d !== 0) return d;
-    return (Number(a.시도) || 0) - (Number(b.시도) || 0);
-  });
-  const last = sorted[sorted.length - 1];
-  const recent = el('span', 'dash-card-recent');
-  if (last) {
-    recent.append(el('span', null, `최근 ${last.총점 != null ? Number(last.총점).toFixed(1) : '-'}`));
-    if (last.합격여부) recent.append(el('span', `badge ${last.합격여부 === '합격' ? 'pass' : 'fail'}`, last.합격여부));
+  const mid = el('div');
+  mid.append(el('div', 'home-card-name', c.cert), el('div', 'home-card-grade', c.grade));
+
+  const foot = el('div', 'home-card-foot');
+  const part = el('span', 'home-card-part');
+  part.append(
+    svg('<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="5.5" r="2.6"></circle><path d="M3 13.5a5 5 0 0 1 10 0"></path></svg>'),
+    document.createTextNode(`참여자 ${(c.participants || []).length}`)
+  );
+  foot.append(part);
+  if (last && last.score != null) {
+    const label = `${Number(last.score).toFixed(0)} · ${last.judge || ''}`.trim();
+    foot.append(el('span', `home-card-last ${judgeCls(last.judge)}`, label));
   } else {
-    recent.append(el('span', 'muted', '시작 전'));
+    foot.append(el('span', 'home-card-none', '기록 없음'));
   }
-  card.append(recent);
 
+  card.append(top, mid, foot);
   card.addEventListener('click', () => {
     location.hash = certHash(c.grade, c.cert);
   });
   return card;
 }
 
-// dashed "새 자격증 등록" 카드(인라인 폼: 분야 datalist + 자격증명 → POST /api/certs).
-function registerCard(certs) {
-  const card = el('div', 'dash-card dash-card-add');
+// ── 자격증 등록 다이얼로그 ───────────────────────────────────────────────────
+function openCertRegDialog(gradeNames) {
+  const overlay = el('div', 'modal-overlay');
+  const box = el('div', 'modal-box');
+  box.style.maxWidth = '440px';
+  box.setAttribute('role', 'dialog');
+  box.setAttribute('aria-modal', 'true');
+  overlay.addEventListener('click', (e) => {
+    if (e.target === overlay) overlay.remove();
+  });
 
-  const openBtn = el('button', 'dash-add-open', '＋ 새 자격증 등록');
-  openBtn.type = 'button';
-  const formWrap = el('div', 'dash-add-form');
-  formWrap.hidden = true;
+  box.append(el('h2', 'dlg-title', '자격증 등록'));
+  box.append(el('p', 'dlg-desc', '_공통 골격이 자동으로 생성돼요.'));
 
-  const gradeField = el('label', 'field');
-  gradeField.append(el('span', null, '종류 (분야, 예: 정보처리)'));
-  const gradeInput = el('input');
+  box.append(el('label', 'dlg-label', '종류 (분야)'));
+  const gradeInput = el('input', 'dlg-input');
   gradeInput.type = 'text';
-  gradeInput.setAttribute('list', 'dash-grade-suggestions');
+  gradeInput.placeholder = '예: 정보처리';
+  gradeInput.setAttribute('list', 'home-grade-list');
   const datalist = document.createElement('datalist');
-  datalist.id = 'dash-grade-suggestions';
-  for (const g of [...new Set((certs || []).map((c) => c.grade))].sort()) datalist.append(new Option(g, g));
-  gradeField.append(gradeInput, datalist);
+  datalist.id = 'home-grade-list';
+  for (const g of gradeNames) datalist.append(new Option(g, g));
+  box.append(gradeInput, datalist);
 
-  const certField = el('label', 'field');
-  certField.append(el('span', null, '자격증명 (예: 정보처리기사)'));
-  const certInput = el('input');
+  box.append(el('label', 'dlg-label', '자격증명'));
+  const certInput = el('input', 'dlg-input');
   certInput.type = 'text';
-  certField.append(certInput);
+  certInput.placeholder = '예: 정보처리기사';
+  box.append(certInput);
 
-  const submit = el('button', 'btn', '등록');
-  submit.type = 'button';
-  const cancel = el('button', 'btn ghost sm', '취소');
+  const err = el('div', 'dlg-error');
+  err.hidden = true;
+  box.append(err);
+  const showErr = (msg) => {
+    err.innerHTML =
+      '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="8" cy="8" r="6.5"></circle><path d="M8 5v3.5M8 11h.01"></path></svg>';
+    err.append(document.createTextNode(msg));
+    err.hidden = false;
+  };
+
+  const actions = el('div', 'dlg-actions');
+  const cancel = el('button', 'dlg-btn-cancel', '취소');
   cancel.type = 'button';
-  const status = el('span', 'status-msg');
-  const actions = el('div', 'dash-add-actions');
-  actions.append(submit, cancel);
-  formWrap.append(gradeField, certField, actions, status);
-
-  card.append(openBtn, formWrap);
-
-  const open = () => {
-    openBtn.hidden = true;
-    formWrap.hidden = false;
-    gradeInput.focus();
-  };
-  const close = () => {
-    formWrap.hidden = true;
-    openBtn.hidden = false;
-    status.textContent = '';
-  };
-  openBtn.addEventListener('click', open);
-  cancel.addEventListener('click', close);
-
-  // 사이드바에서 진입한 경우 자동 오픈.
-  try {
-    if (sessionStorage.getItem(OPEN_REGISTER_KEY)) {
-      sessionStorage.removeItem(OPEN_REGISTER_KEY);
-      setTimeout(() => {
-        open();
-        card.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      }, 0);
-    }
-  } catch (_e) {
-    /* 무시 */
-  }
+  cancel.addEventListener('click', () => overlay.remove());
+  const submit = el('button', 'dlg-btn-primary', '생성');
+  submit.type = 'button';
+  actions.append(cancel, submit);
+  box.append(actions);
 
   submit.addEventListener('click', async () => {
     const 종류 = (gradeInput.value || '').trim().normalize('NFC');
     const 자격증 = (certInput.value || '').trim().normalize('NFC');
     if (!종류 || !자격증) {
-      status.className = 'status-msg error-text';
-      status.textContent = '종류와 자격증명을 모두 입력하세요.';
+      showErr('종류와 자격증명을 모두 입력해 주세요.');
       return;
     }
     submit.disabled = true;
-    status.className = 'status-msg';
-    status.textContent = '등록 중…';
     try {
       const res = await apiFetch('/api/certs', { method: 'POST', body: { 종류, 자격증 } });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        status.className = 'status-msg error-text';
-        status.textContent = res.status === 409 ? '이미 존재하는 자격증입니다.' : data.error || '등록 실패';
+        showErr(res.status === 409 ? '이미 있는 자격증이에요.' : data.error || '등록 실패');
+        submit.disabled = false;
         return;
       }
       toast(`${자격증} 등록 완료`, 'ok');
-      location.hash = certHash(종류, 자격증); // 방금 만든 자격증 상세로 이동
+      overlay.remove();
+      location.hash = certHash(종류, 자격증);
     } catch (e) {
-      status.className = 'status-msg error-text';
-      status.textContent = e.message;
-    } finally {
+      showErr(e.message);
       submit.disabled = false;
     }
   });
 
-  return card;
-}
-
-// ── 스켈레톤 ─────────────────────────────────────────────────────────────────
-function skeletonStatus() {
-  const wrap = el('div', 'dash-status-skel');
-  wrap.append(el('div', 'skeleton dash-title-skel'));
-  const grid = el('div', 'dash-stat-grid');
-  for (let i = 0; i < 4; i += 1) grid.append(el('div', 'skeleton dash-stat-skel'));
-  wrap.append(grid);
-  return wrap;
-}
-
-function skeletonGrid() {
-  const grid = el('div', 'dash-grid');
-  for (let i = 0; i < 3; i += 1) grid.append(el('div', 'skeleton dash-card-skel'));
-  return grid;
+  overlay.append(box);
+  document.body.append(overlay);
+  gradeInput.focus();
 }
 
 export function unmount() {
   view.alive = false;
-  if (view.onFsChange) window.removeEventListener('qnet:fs-change', view.onFsChange);
-  view.onFsChange = null;
-  view.container = null;
+  if (view.onFs) window.removeEventListener('qnet:fs-change', view.onFs);
+  view.onFs = null;
 }

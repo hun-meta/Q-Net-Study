@@ -128,3 +128,14 @@ export function setTheme(mode) {
   else root.dataset.theme = m;
   return m;
 }
+
+// 현재 실효 테마('light'|'dark'). 'auto'면 OS 설정(prefers-color-scheme)으로 해석.
+export function resolvedTheme() {
+  const t = getTheme();
+  if (t === 'light' || t === 'dark') return t;
+  try {
+    return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  } catch (_e) {
+    return 'light';
+  }
+}

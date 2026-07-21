@@ -1,15 +1,26 @@
-// 온보딩(닉네임 미설정 시 전체 화면): 앱 한 줄 소개 + 기존 참여자 드롭다운 + 새 닉네임 입력.
-// 성공 시 setNickname 후 대시보드(#/)로 이동한다.
-// 뷰 인터페이스: export async function mount(container, params) / export function unmount().
+// 온보딩(닉네임 미설정 시 전체 화면): 로고 + 기존 참여자 select / 새 닉네임 입력 2모드.
+// 성공 시 setNickname 후 홈(#/)으로 이동. 뷰 계약: mount(container, params) / unmount().
 
 import { apiFetch, setNickname } from '../store.js';
 import { toast } from '../components/toast.js';
+import { navigate } from '../router.js';
 
 function el(tag, cls, text) {
   const node = document.createElement(tag);
   if (cls) node.className = cls;
   if (text != null) node.textContent = text;
   return node;
+}
+
+// 프로토타입과 동일한 클라이언트 검증(서버도 재검증).
+function validateNick(n) {
+  n = (n || '').trim();
+  if (!n) return '닉네임을 입력해 주세요.';
+  if (n.length > 40) return '40자 이내로 입력해 주세요.';
+  if (n === '_공통') return '_공통은 예약어라 쓸 수 없어요.';
+  if (n[0] === '.') return '.으로 시작할 수 없어요.';
+  if (/[\\/:*?"<>|]/.test(n)) return '경로에 쓸 수 없는 문자가 있어요.';
+  return '';
 }
 
 async function fetchParticipants() {
@@ -31,87 +42,148 @@ async function fetchParticipants() {
 
 export async function mount(container, _params) {
   container.innerHTML = '';
-  const view = el('section', 'onb');
-  const card = el('div', 'onb-card');
 
+  let mode = 'select'; // 'select' | 'new'
+  let selectedVal = '';
+  let newVal = '';
+  let participants = [];
+
+  const wrap = el('section', 'onb');
+  const inner = el('div', 'onb-inner');
+
+  // 로고 헤더.
   const brand = el('div', 'onb-brand');
-  brand.append(el('span', 'brand-mark', 'Q'), el('h2', 'onb-title', 'Q-Net 기출 풀이'));
-  card.append(brand);
+  brand.append(el('div', 'onb-logo', 'Q'));
+  const btext = el('div', 'onb-brand-text');
+  btext.append(el('div', 'onb-brand-title', 'Q-Net 기출 풀이'), el('div', 'onb-brand-sub', '로컬 전용 · 127.0.0.1'));
+  brand.append(btext);
 
-  card.append(
-    el(
-      'p',
-      'onb-lead',
-      '기출 PDF를 풀고, 자동 채점받고, 오답을 복습하는 로컬 스터디 앱입니다.'
-    )
-  );
+  // 카드.
+  const card = el('div', 'onb-card');
+  card.append(el('h1', 'onb-title', '누구로 학습할까요?'));
+  const lead = el('p', 'onb-lead');
+  lead.innerHTML = '닉네임은 이 저장소에서 <b>내 기록 폴더의 이름</b>이 돼요. 스터디원과 커밋으로 공유됩니다.';
+  card.append(lead);
 
-  // 기존 참여자 드롭다운.
-  const pickField = el('label', 'field onb-field');
-  pickField.append(el('span', null, '닉네임 선택 (기존 참여자)'));
-  const select = el('select');
-  select.disabled = true;
-  select.append(new Option('불러오는 중…', ''));
-  pickField.append(select);
+  const body = el('div', 'onb-body');
+  card.append(body);
 
-  // 새 닉네임 입력.
-  const newField = el('label', 'field onb-field');
-  newField.append(el('span', null, '또는 새 닉네임'));
-  const newRow = el('div', 'onb-new-row');
-  const input = el('input');
-  input.type = 'text';
-  input.placeholder = '새 닉네임 입력';
-  const start = el('button', 'btn onb-start', '시작하기');
-  start.type = 'button';
-  newRow.append(input, start);
-  newField.append(newRow);
+  const errLine = el('div', 'onb-error');
+  errLine.hidden = true;
+  card.append(errLine);
 
-  const err = el('span', 'error-text onb-err');
+  const submit = el('button', 'btn onb-submit', '시작하기');
+  submit.type = 'button';
+  card.append(submit);
 
-  card.append(pickField, newField, err);
-  view.append(card);
-  container.append(view);
+  const rules = el('p', 'onb-rules');
+  rules.innerHTML =
+    '빈 값·40자 초과·경로 문자·<code>.</code> 시작·<code>_공통</code>은 사용할 수 없어요.';
 
-  fetchParticipants().then((participants) => {
-    select.innerHTML = '';
-    select.append(new Option('기존 참여자 선택…', ''));
-    for (const p of participants) select.append(new Option(p, p));
-    select.disabled = false;
-  });
+  inner.append(brand, card, rules);
+  wrap.append(inner);
+  container.append(wrap);
 
-  async function submit(value) {
-    const v = (value || '').trim();
-    if (!v) {
-      err.textContent = '닉네임을 선택하거나 입력하세요.';
+  function clearErr() {
+    errLine.hidden = true;
+    errLine.textContent = '';
+  }
+  function showErr(msg) {
+    errLine.innerHTML =
+      '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="8" cy="8" r="6.5"></circle><path d="M8 5v3.5M8 11h.01"></path></svg>';
+    errLine.append(document.createTextNode(msg));
+    errLine.hidden = false;
+  }
+
+  function renderBody() {
+    body.innerHTML = '';
+    if (mode === 'select') {
+      body.append(el('label', 'onb-field-label', '참여자 선택'));
+      const sw = el('div', 'onb-select-wrap');
+      const select = el('select', 'onb-select');
+      select.append(new Option('참여자 선택…', ''));
+      for (const p of participants) select.append(new Option(p, p));
+      select.append(new Option('+ 새 닉네임 등록…', '__new'));
+      select.value = selectedVal;
+      select.addEventListener('change', () => {
+        if (select.value === '__new') {
+          mode = 'new';
+          newVal = '';
+          clearErr();
+          renderBody();
+          const i = body.querySelector('.onb-input');
+          if (i) i.focus();
+        } else {
+          selectedVal = select.value;
+          clearErr();
+        }
+      });
+      const chev = el('span', 'onb-select-chevron');
+      chev.innerHTML =
+        '<svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6l4 4 4-4"></path></svg>';
+      sw.append(select, chev);
+      body.append(sw);
+    } else {
+      const head = el('div', 'onb-new-head');
+      head.append(el('label', 'onb-field-label', '새 닉네임'));
+      const back = el('button', 'onb-back-link', '← 기존에서 선택');
+      back.type = 'button';
+      back.addEventListener('click', () => {
+        mode = 'select';
+        clearErr();
+        renderBody();
+      });
+      head.append(back);
+      body.append(head);
+
+      const input = el('input', 'onb-input');
+      input.type = 'text';
+      input.maxLength = 41;
+      input.placeholder = '예: 민준';
+      input.value = newVal;
+      input.addEventListener('input', () => {
+        newVal = input.value;
+        clearErr();
+      });
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') doSubmit();
+      });
+      body.append(input);
+    }
+  }
+
+  async function doSubmit() {
+    const value = mode === 'new' ? newVal : selectedVal;
+    if (mode === 'select' && !value) {
+      showErr('참여자를 선택해 주세요.');
       return;
     }
-    err.textContent = '';
-    start.disabled = true;
+    const verr = validateNick(value);
+    if (verr) {
+      showErr(verr);
+      return;
+    }
+    submit.disabled = true;
     try {
-      const res = await apiFetch('/api/nickname', { method: 'POST', body: { nickname: v } });
+      const res = await apiFetch('/api/nickname', { method: 'POST', body: { nickname: value.trim() } });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || '등록 실패');
       setNickname(data.nickname);
       toast(`환영합니다, ${data.nickname}`, 'ok');
-      window.dispatchEvent(
-        new CustomEvent('qnet:nickname-changed', { detail: { nickname: data.nickname } })
-      );
-      location.hash = '#/'; // 대시보드로(닉네임 설정 → 홈 라우트가 대시보드로 해석됨)
+      window.dispatchEvent(new CustomEvent('qnet:nickname-changed', { detail: { nickname: data.nickname } }));
+      navigate('#/');
     } catch (e) {
-      err.textContent = e.message;
-      start.disabled = false;
+      showErr(e.message);
+      submit.disabled = false;
     }
   }
+  submit.addEventListener('click', doSubmit);
 
-  select.addEventListener('change', () => {
-    if (select.value) submit(select.value);
-  });
-  start.addEventListener('click', () => submit(input.value));
-  input.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') submit(input.value);
+  renderBody();
+  fetchParticipants().then((list) => {
+    participants = list;
+    if (mode === 'select') renderBody();
   });
 }
 
-export function unmount() {
-  // 문서 레벨 리스너 없음 — 컨테이너 정리는 라우터가 담당.
-}
+export function unmount() {}

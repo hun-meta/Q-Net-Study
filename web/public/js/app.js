@@ -1,109 +1,144 @@
-// 앱 부트스트랩: 테마 적용 → 상태 로드 → 토스트/토글 마운트 → CLI 배너 → 닉네임 메뉴 → 라우터 → SSE.
+// 앱 부트스트랩: 테마 적용 → 상태 로드 → 토스트 → 테마 토글 → CLI 뱃지 → 닉네임 메뉴 → 라우터 → SSE.
+// 헤더의 브레드크럼/노출 토글은 router.js 가 담당한다. SSE 이벤트(fs-change/audit-warning/
+// participants-change)를 window 커스텀 이벤트로 재발행해 각 화면이 실시간 반영에 사용한다.
 
-import { loadState, getState, getTheme, setTheme } from './store.js';
+import { loadState, getState, getTheme, setTheme, resolvedTheme } from './store.js';
 import { startRouter } from './router.js';
 import { renderNicknameMenu } from './components/nicknameMenu.js';
 import { mountToast } from './components/toast.js';
+
+const ICON_SUN =
+  '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="8" cy="8" r="3.2"></circle><path d="M8 1v1.6M8 13.4V15M15 8h-1.6M2.6 8H1M12.9 3.1l-1.1 1.1M4.2 11.8l-1.1 1.1M12.9 12.9l-1.1-1.1M4.2 4.2 3.1 3.1"></path></svg>';
+const ICON_MOON =
+  '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M13.5 9.3A5.4 5.4 0 0 1 6.7 2.5 5.5 5.5 0 1 0 13.5 9.3z"></path></svg>';
 
 // 저장된 테마를 <html data-theme>에 즉시 반영(로드 전 깜빡임 최소화).
 function applyStoredTheme() {
   setTheme(getTheme());
 }
 
-// 헤더 테마 토글: auto → light → dark 순환.
+// 헤더 테마 토글: auto → light → dark 순환. 아이콘은 현재 실효 테마(해·달)를 표시.
 function setupThemeToggle() {
   const btn = document.getElementById('theme-toggle');
   if (!btn) return;
   const order = ['auto', 'light', 'dark'];
-  const icon = { auto: '◐', light: '☀', dark: '☾' };
   const label = { auto: '자동', light: '라이트', dark: '다크' };
   function paint() {
     const t = getTheme();
-    btn.textContent = icon[t];
+    btn.innerHTML = resolvedTheme() === 'dark' ? ICON_MOON : ICON_SUN;
+    btn.title = `테마: ${label[t]} (클릭해 전환)`;
     btn.setAttribute('aria-label', `테마 전환 (현재: ${label[t]})`);
-    btn.title = `테마: ${label[t]}`;
   }
   btn.addEventListener('click', () => {
     const cur = getTheme();
     setTheme(order[(order.indexOf(cur) + 1) % order.length]);
     paint();
   });
+  try {
+    window
+      .matchMedia('(prefers-color-scheme: dark)')
+      .addEventListener('change', () => {
+        if (getTheme() === 'auto') paint();
+      });
+  } catch (_e) {
+    /* matchMedia 미지원 — 무시 */
+  }
   paint();
 }
 
-// 사이드바 토글(풀이 몰입 모드에서 재노출용). CSS가 route-solve/sidebar-open 상태를 스타일링.
-function setupSidebarToggle() {
-  const btn = document.getElementById('sidebar-toggle');
-  if (!btn) return;
-  btn.addEventListener('click', () => {
-    document.body.classList.toggle('sidebar-open');
-  });
+// 헤더 CLI 뱃지(agy=cli.chat / claude=cli.record). 미설치 시 취소선+흐림.
+function cliBadge(name, available, tip) {
+  const s = document.createElement('span');
+  s.className = 'cli-badge' + (available ? ' on' : ' off');
+  s.title = tip;
+  const dot = document.createElement('span');
+  dot.className = 'cli-dot';
+  s.append(dot, document.createTextNode(name));
+  return s;
 }
 
-// CLI(agy·claude) 감지 배너: 정상(ok)이면 5초 후 자동 축소(헤더 도트로 대체), 경고는 유지.
-function renderCliBanner() {
-  const banner = document.getElementById('cli-banner');
-  const dot = document.getElementById('cli-dot');
+function renderCliBadges() {
+  const host = document.getElementById('cli-badges');
+  if (!host) return;
   const { cli } = getState();
-  const missing = [];
-  if (!cli.chat.available) missing.push('agy(챗)');
-  if (!cli.record.available) missing.push('claude(기록)');
+  const agy = !!(cli && cli.chat && cli.chat.available);
+  const claude = !!(cli && cli.record && cli.record.available);
+  host.innerHTML = '';
+  host.append(
+    cliBadge('agy', agy, agy ? 'agy(챗) 감지됨 — 문항 챗 사용 가능' : 'agy(챗) 미설치·미로그인 — 챗 비활성'),
+    cliBadge(
+      'claude',
+      claude,
+      claude ? 'claude(기록) 감지됨 — 자동 추출·정리 기록 사용 가능' : 'claude(기록) 미설치·미로그인 — 자동 추출·정리 비활성'
+    )
+  );
+}
 
-  if (missing.length === 0) {
-    banner.className = 'cli-banner ok';
-    banner.textContent = 'agy·claude 감지됨 — AI 챗·기록 기능 사용 가능';
-    banner.hidden = false;
-    if (dot) {
-      dot.className = 'cli-dot ok';
-      dot.title = 'agy·claude 감지됨';
-      dot.hidden = true;
-    }
-    // 5초 후 축소: 배너 숨기고 헤더 상태 도트 노출.
-    setTimeout(() => {
-      banner.hidden = true;
-      if (dot) dot.hidden = false;
-    }, 5000);
-  } else {
-    banner.className = 'cli-banner warn';
-    banner.textContent = `${missing.join(', ')} 미설치 — 해당 AI 기능은 비활성화되며, 풀이·채점·기록 열람 등 핵심 기능은 정상 동작합니다.`;
-    banner.hidden = false;
-    if (dot) {
-      dot.className = 'cli-dot warn';
-      dot.title = banner.textContent;
-      dot.hidden = true; // 경고는 배너로 상시 표시(도트 중복 억제)
-    }
+// 감사 경고 배너: 허용 경계 밖 수정이 원복됐을 때(SSE audit-warning) 표시.
+function showAuditBanner(detail) {
+  const banner = document.getElementById('audit-banner');
+  if (!banner) return;
+  const violations = (detail && detail.violations) || [];
+  banner.innerHTML = '';
+
+  const icon = document.createElement('span');
+  icon.style.cssText = 'flex:none;margin-top:1px;display:inline-flex';
+  icon.innerHTML =
+    '<svg width="17" height="17" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 1.7 15 14H1z"></path><path d="M8 6.3v3.4"></path><path d="M8 11.7h.01"></path></svg>';
+
+  const body = document.createElement('div');
+  body.className = 'audit-banner-body';
+  const b = document.createElement('b');
+  b.textContent = 'AI가 허용 범위 밖 파일을 수정하려 해 원복했어요.';
+  body.append(b);
+  if (violations.length) {
+    const p = document.createElement('div');
+    p.className = 'audit-banner-path';
+    p.textContent = violations.join(' · ');
+    body.append(p);
   }
+
+  const close = document.createElement('button');
+  close.className = 'audit-banner-close';
+  close.type = 'button';
+  close.setAttribute('aria-label', '닫기');
+  close.innerHTML =
+    '<svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M4 4l8 8M12 4l-8 8"></path></svg>';
+  close.addEventListener('click', () => {
+    banner.hidden = true;
+  });
+
+  banner.append(icon, body, close);
+  banner.hidden = false;
 }
 
 // SSE 연결(파일 변경 실시간 반영). Last-Event-ID 재동기화는 브라우저가 자동 처리.
 function connectSse() {
-  const statusEl = document.getElementById('conn-status');
+  const badge = document.getElementById('sse-badge');
+  function setBadge(on) {
+    if (!badge) return;
+    badge.className = 'sse-badge' + (on ? ' on' : ' off');
+    badge.innerHTML = `<span class="sse-dot"></span>${on ? '실시간' : '연결 끊김'}`;
+    badge.title = on
+      ? '실시간 반영(SSE) — md 파일 변경을 자동 감지'
+      : '연결 끊김 — 재연결 중';
+  }
+  setBadge(false);
+
   const es = new EventSource('/api/events');
+  es.addEventListener('open', () => setBadge(true));
+  es.addEventListener('error', () => setBadge(false));
 
-  es.addEventListener('open', () => {
-    statusEl.textContent = '실시간 연결됨';
-    statusEl.className = 'conn-status on';
-  });
-
-  es.addEventListener('error', () => {
-    statusEl.textContent = '연결 끊김 — 재연결 중';
-    statusEl.className = 'conn-status off';
-  });
-
-  // 파일 변경 이벤트: 화면 모듈이 갱신 훅으로 사용(전역 이벤트 재발행).
-  // 워처가 여러 파일을 연쇄 저장하거나 이벤트가 폭주하면 리스너들(사이드바·대시보드·
-  // 자격증상세·개념 패널)이 각각 API를 재조회해 요청 폭주가 발생한다. 트레일링 디바운스
-  // (400ms)로 버스트를 코얼레싱해 마지막 이벤트만 1회 재발행한다.
+  // 파일 변경(fs-change): 워처가 버스트로 연쇄 저장할 때 트레일링 디바운스(400ms)로
+  // 코얼레싱해 마지막 이벤트만 1회 qnet:fs-change 로 재발행한다.
   const FS_DEBOUNCE_MS = 400;
   let fsTimer = null;
-  let fsLastDetail = null; // 버스트 마지막 이벤트의 detail(재발행 기준)
-  let fsBurstCount = 0; // 버스트 동안 합쳐진 이벤트 수
-  let fsBurstPaths = []; // 버스트 동안 수집된 변경 경로
+  let fsLastDetail = null;
+  let fsBurstCount = 0;
+  let fsBurstPaths = [];
 
   function flushFsChange() {
     fsTimer = null;
-    // 마지막 detail을 그대로 보존. 실제로 여러 이벤트가 합쳐진 경우에만 코얼레싱 정보를 첨부
-    // (수신부는 detail 구조에 민감하지 않아 단일 이벤트는 기존 계약 그대로 유지된다).
     const detail = { ...(fsLastDetail || {}) };
     if (fsBurstCount > 1) {
       detail.coalesced = true;
@@ -120,11 +155,31 @@ function connectSse() {
       const detail = JSON.parse(evt.data);
       fsLastDetail = detail;
       fsBurstCount += 1;
-      // 서버 이벤트 형태별 변경 경로 수집(있으면). watcher는 changes, 라우트는 paths 사용.
       if (Array.isArray(detail.paths)) fsBurstPaths.push(...detail.paths);
       else if (Array.isArray(detail.changes)) fsBurstPaths.push(...detail.changes);
       if (fsTimer) clearTimeout(fsTimer);
       fsTimer = setTimeout(flushFsChange, FS_DEBOUNCE_MS);
+    } catch (_e) {
+      /* noop */
+    }
+  });
+
+  // 감사 경고(audit-warning): 배너 표시 + 재발행(개별 화면이 필요 시 구독).
+  es.addEventListener('audit-warning', (evt) => {
+    try {
+      const detail = JSON.parse(evt.data);
+      showAuditBanner(detail);
+      window.dispatchEvent(new CustomEvent('qnet:audit-warning', { detail }));
+    } catch (_e) {
+      /* noop */
+    }
+  });
+
+  // 참여자 변경(participants-change): 온보딩·닉네임 드롭다운 등이 구독.
+  es.addEventListener('participants-change', (evt) => {
+    try {
+      const detail = JSON.parse(evt.data);
+      window.dispatchEvent(new CustomEvent('qnet:participants-change', { detail }));
     } catch (_e) {
       /* noop */
     }
@@ -138,14 +193,14 @@ async function main() {
   try {
     await loadState();
   } catch (e) {
-    document.getElementById('app').innerHTML = `<p class="error-text">${e.message}</p>`;
+    document.getElementById('app').innerHTML =
+      `<p class="error-text" style="padding:40px">${e.message}</p>`;
     return;
   }
 
   mountToast();
   setupThemeToggle();
-  setupSidebarToggle();
-  renderCliBanner();
+  renderCliBadges();
 
   const nickArea = document.getElementById('nickname-area');
   renderNicknameMenu(nickArea);

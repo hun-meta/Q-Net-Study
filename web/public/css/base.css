@@ -1,8 +1,12 @@
 /* ==========================================================================
    Q-Net 기출 풀이 — base.css
-   토큰(라이트/다크/토글 3상태) · 리셋 · 타이포 · 공용 컴포넌트.
-   무빌드 바닐라 앱. 외부 리소스 금지(폰트/CDN/이미지 URL 없음).
+   Claude Design 토큰(라이트/다크/토글 3상태) · 리셋 · 타이포 · 애니메이션 · 공용 컴포넌트.
+   무빌드 바닐라 앱. 외부 리소스 금지(폰트/CDN/이미지 URL 없음) — 시스템 폰트.
    색은 전부 var(--토큰). 하드코딩 색은 :root 토큰 블록·rgba(그림자/링/스크림)만 허용.
+
+   토큰 이름은 디자인 산출물 기준(--fg-2/-3, --surface-2/-3, --accent-weak,
+   --success/-danger/-warn, --shadow/-lg)을 정본으로 삼고, 구버전 별칭(--fg-muted 등)을
+   var()로 연결해 기존 CSS가 새 팔레트로 자동 렌더되도록 유지한다.
    ========================================================================== */
 
 /* --------------------------------------------------------------------------
@@ -12,47 +16,61 @@
   color-scheme: light;
 
   /* 표면 */
-  --bg: #f5f6f8;           /* 페이지 배경 */
-  --surface: #ffffff;       /* 카드 */
-  --surface-2: #eef0f3;     /* 우물(뷰어 배경, pre, 트랙) */
-  --border: #e3e6ea;
-  --border-strong: #cdd3da;
+  --bg: #f6f6f4;
+  --surface: #ffffff;
+  --surface-2: #f1f1ee;
+  --surface-3: #e9e9e5;
+  --border: rgba(20, 20, 19, .09);
+  --border-2: rgba(20, 20, 19, .15);
 
   /* 텍스트 */
-  --fg: #191c20;
-  --fg-muted: #5b6572;
-  --fg-faint: #8b95a1;
+  --fg: #1b1b1a;
+  --fg-2: #5f5f5a;
+  --fg-3: #94948e;
 
-  /* 액센트 (인디고) */
-  --accent: #4f46e5;
-  --accent-hover: #4338ca;
-  --accent-soft: #eef2ff;
-  --accent-fg-on: #ffffff;
+  /* 액센트(인디고) */
+  --accent: oklch(.55 .13 264);
+  --accent-fg: #ffffff;
+  --accent-weak: oklch(.95 .03 264);
+  --accent-border: oklch(.84 .06 264);
 
   /* 시맨틱 */
-  --ok: #059669;      --ok-soft: #ecfdf5;
-  --warn: #b45309;    --warn-soft: #fffbeb;
-  --danger: #dc2626;  --danger-soft: #fef2f2;
+  --success: oklch(.56 .11 155);   --success-weak: oklch(.95 .04 155);
+  --danger:  oklch(.56 .18 27);    --danger-weak:  oklch(.95 .05 27);
+  --warn:    oklch(.66 .12 68);    --warn-weak:    oklch(.95 .06 82);
 
   /* 형태 */
   --radius-s: 8px;
   --radius-m: 12px;
   --radius-l: 16px;
-  --shadow-1: 0 1px 2px rgba(16, 24, 40, .05);
-  --shadow-2: 0 1px 3px rgba(16, 24, 40, .06), 0 4px 12px rgba(16, 24, 40, .06);
+  --radius-xl: 18px;
+  --shadow: 0 1px 2px rgba(0, 0, 0, .04), 0 6px 20px rgba(0, 0, 0, .06);
+  --shadow-lg: 0 12px 48px rgba(0, 0, 0, .18);
 
-  /* 포커스 링 · 모달/사이드바 스크림(rgba 예외 허용) */
-  --ring: 0 0 0 3px rgba(79, 70, 229, .28);
-  --scrim: rgba(16, 24, 40, .45);
+  /* 포커스 링 · 스크림 */
+  --ring: 0 0 0 3px var(--accent-weak);
+  --scrim: rgba(0, 0, 0, .40);
 
   /* 셸 치수 */
-  --header-h: 52px;
-  --sidebar-w: 260px;
+  --header-h: 54px;
 
-  /* 타이포 — 로컬 폴백 스택(외부 로드 없음) */
-  --font: "Pretendard Variable", Pretendard, system-ui, -apple-system,
-          "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+  /* 타이포 — 시스템 폰트 스택(외부 로드 없음, 디자인 산출물과 동일) */
+  --font: -apple-system, BlinkMacSystemFont, "Segoe UI", "Apple SD Gothic Neo",
+          "Malgun Gothic", "Noto Sans KR", system-ui, sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+
+  /* ── 구버전 별칭(정본 토큰으로 연결 — 값은 테마 따라 자동 반영) ── */
+  --fg-muted: var(--fg-2);
+  --fg-faint: var(--fg-3);
+  --border-strong: var(--border-2);
+  --accent-hover: var(--accent);
+  --accent-soft: var(--accent-weak);
+  --accent-fg-on: var(--accent-fg);
+  --ok: var(--success);       --ok-soft: var(--success-weak);
+  --warn-soft: var(--warn-weak);
+  --danger-soft: var(--danger-weak);
+  --shadow-1: var(--shadow);
+  --shadow-2: var(--shadow);
 }
 
 /* 다크 토큰 — OS 다크 + 사용자가 라이트를 강제하지 않은 경우(auto/dark) */
@@ -60,59 +78,59 @@
   :root:not([data-theme="light"]) {
     color-scheme: dark;
 
-    --bg: #101317;
-    --surface: #171b21;
-    --surface-2: #1f242c;
-    --border: #2a313b;
-    --border-strong: #3a434f;
+    --bg: #141413;
+    --surface: #1c1c1b;
+    --surface-2: #242422;
+    --surface-3: #2e2e2b;
+    --border: rgba(255, 255, 255, .09);
+    --border-2: rgba(255, 255, 255, .16);
 
-    --fg: #e6e9ed;
-    --fg-muted: #9aa4b1;
-    --fg-faint: #6b7684;
+    --fg: #efefec;
+    --fg-2: #a4a49d;
+    --fg-3: #6f6f68;
 
-    --accent: #818cf8;
-    --accent-hover: #a5b0ff;
-    --accent-soft: #27273f;
-    --accent-fg-on: #0e1116;
+    --accent: oklch(.7 .12 264);
+    --accent-fg: #14141a;
+    --accent-weak: oklch(.32 .06 264);
+    --accent-border: oklch(.46 .08 264);
 
-    --ok: #34d399;      --ok-soft: #0e2b22;
-    --warn: #fbbf24;    --warn-soft: #2b220e;
-    --danger: #f87171;  --danger-soft: #2b1414;
+    --success: oklch(.72 .13 155);  --success-weak: oklch(.3 .05 155);
+    --danger:  oklch(.68 .16 27);   --danger-weak:  oklch(.32 .07 27);
+    --warn:    oklch(.78 .12 75);   --warn-weak:    oklch(.34 .06 75);
 
-    --shadow-1: 0 1px 2px rgba(0, 0, 0, .30);
-    --shadow-2: 0 1px 3px rgba(0, 0, 0, .35), 0 4px 12px rgba(0, 0, 0, .35);
-    --ring: 0 0 0 3px rgba(129, 140, 248, .32);
+    --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 6px 20px rgba(0, 0, 0, .5);
+    --shadow-lg: 0 12px 48px rgba(0, 0, 0, .6);
     --scrim: rgba(0, 0, 0, .58);
   }
 }
 
-/* 다크 토큰 — 사용자가 명시적으로 다크 선택(토글 dark). OS 설정 무관하게 적용.
-   (변수 묶음 중복은 의도된 것 — 위 미디어 블록과 값 동일) */
+/* 다크 토큰 — 사용자가 명시적으로 다크 선택(토글 dark). OS 설정 무관.
+   (위 미디어 블록과 값 동일 — 의도된 중복) */
 :root[data-theme="dark"] {
   color-scheme: dark;
 
-  --bg: #101317;
-  --surface: #171b21;
-  --surface-2: #1f242c;
-  --border: #2a313b;
-  --border-strong: #3a434f;
+  --bg: #141413;
+  --surface: #1c1c1b;
+  --surface-2: #242422;
+  --surface-3: #2e2e2b;
+  --border: rgba(255, 255, 255, .09);
+  --border-2: rgba(255, 255, 255, .16);
 
-  --fg: #e6e9ed;
-  --fg-muted: #9aa4b1;
-  --fg-faint: #6b7684;
+  --fg: #efefec;
+  --fg-2: #a4a49d;
+  --fg-3: #6f6f68;
 
-  --accent: #818cf8;
-  --accent-hover: #a5b0ff;
-  --accent-soft: #27273f;
-  --accent-fg-on: #0e1116;
+  --accent: oklch(.7 .12 264);
+  --accent-fg: #14141a;
+  --accent-weak: oklch(.32 .06 264);
+  --accent-border: oklch(.46 .08 264);
 
-  --ok: #34d399;      --ok-soft: #0e2b22;
-  --warn: #fbbf24;    --warn-soft: #2b220e;
-  --danger: #f87171;  --danger-soft: #2b1414;
+  --success: oklch(.72 .13 155);  --success-weak: oklch(.3 .05 155);
+  --danger:  oklch(.68 .16 27);   --danger-weak:  oklch(.32 .07 27);
+  --warn:    oklch(.78 .12 75);   --warn-weak:    oklch(.34 .06 75);
 
-  --shadow-1: 0 1px 2px rgba(0, 0, 0, .30);
-  --shadow-2: 0 1px 3px rgba(0, 0, 0, .35), 0 4px 12px rgba(0, 0, 0, .35);
-  --ring: 0 0 0 3px rgba(129, 140, 248, .32);
+  --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 6px 20px rgba(0, 0, 0, .5);
+  --shadow-lg: 0 12px 48px rgba(0, 0, 0, .6);
   --scrim: rgba(0, 0, 0, .58);
 }
 
@@ -123,8 +141,7 @@
   box-sizing: border-box;
 }
 
-/* hidden 속성 존중: 컴포넌트 display 규칙(flex/grid 등)이 [hidden]을 덮지 않도록 전역 강제.
-   (JS가 .hidden 으로 토글하는 폼/스텝/패널이 display 규칙 때문에 노출되던 문제 차단) */
+/* hidden 속성 존중: 컴포넌트 display 규칙(flex/grid)이 [hidden]을 덮지 않도록 전역 강제. */
 [hidden] {
   display: none !important;
 }
@@ -136,11 +153,21 @@ html {
 body {
   margin: 0;
   font-family: var(--font);
-  font-size: 15px;
+  font-size: 14px;
   line-height: 1.6;
   color: var(--fg);
   background: var(--bg);
   -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
 }
 
 /* 버튼·인풋은 폰트를 상속(브라우저 기본 폰트 억제) */
@@ -149,15 +176,16 @@ input,
 select,
 textarea {
   font-family: inherit;
+  color: inherit;
 }
 
-button {
-  color: inherit;
+::selection {
+  background: var(--accent-weak);
 }
 
 /* 약한 텍스트 유틸 */
 .muted {
-  color: var(--fg-muted);
+  color: var(--fg-2);
   font-size: 13px;
 }
 
@@ -167,7 +195,7 @@ button {
   outline-offset: 2px;
 }
 
-/* 모션 축소 배려 — 트랜지션·애니메이션 최소화 */
+/* 모션 축소 배려 */
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
@@ -180,104 +208,106 @@ button {
 }
 
 /* --------------------------------------------------------------------------
+   애니메이션 · 스크롤바(디자인 산출물 이관)
+   -------------------------------------------------------------------------- */
+@keyframes qspin { to { transform: rotate(360deg); } }
+@keyframes qblink { 0%, 100% { opacity: 1; } 50% { opacity: .15; } }
+@keyframes qfade { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+@keyframes qslide { from { transform: translateX(24px); opacity: 0; } to { transform: none; opacity: 1; } }
+@keyframes qpop { from { transform: scale(.96); opacity: 0; } to { transform: none; opacity: 1; } }
+
+/* 얇은 스크롤바(패널·목록) */
+.qsc { scrollbar-width: thin; scrollbar-color: var(--border-2) transparent; }
+.qsc::-webkit-scrollbar { width: 10px; height: 10px; }
+.qsc::-webkit-scrollbar-thumb {
+  background: var(--border-2);
+  border-radius: 8px;
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+.qsc::-webkit-scrollbar-track { background: transparent; }
+
+/* --------------------------------------------------------------------------
    공용 — 버튼
    -------------------------------------------------------------------------- */
 .btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
+  gap: 7px;
   font: inherit;
-  font-weight: 500;
+  font-size: 13.5px;
+  font-weight: 650;
   line-height: 1.2;
-  min-height: 34px;              /* 클릭 타깃 ≥32px */
-  padding: 8px 14px;
+  min-height: 36px;
+  padding: 9px 15px;
   border: 1px solid var(--accent);
   border-radius: var(--radius-s);
   background: var(--accent);
-  color: var(--accent-fg-on);
+  color: var(--accent-fg);
   cursor: pointer;
-  transition: background .15s ease, border-color .15s ease, color .15s ease, box-shadow .15s ease, transform .15s ease;
+  white-space: nowrap;
+  transition: background .15s ease, border-color .15s ease, color .15s ease,
+              box-shadow .15s ease, filter .15s ease, transform .1s ease;
 }
 
 .btn:hover {
-  background: var(--accent-hover);
-  border-color: var(--accent-hover);
+  filter: brightness(1.06);
 }
 
 .btn:active {
   transform: translateY(0.5px);
 }
 
-/* .secondary: surface 배경 + 보더 + accent 텍스트 */
+/* .secondary: surface 배경 + 보더(디자인의 아웃라인 버튼) */
 .btn.secondary {
   background: var(--surface);
-  border-color: var(--border-strong);
-  color: var(--accent);
+  border-color: var(--border-2);
+  color: var(--fg);
+  font-weight: 600;
 }
 
 .btn.secondary:hover {
-  background: var(--accent-soft);
-  border-color: var(--accent);
+  background: var(--surface-2);
+  filter: none;
 }
 
-/* .ghost: 투명 + muted 텍스트, hover 시 accent 틴트 */
+/* .ghost: 투명 + muted 텍스트 */
 .btn.ghost {
   background: transparent;
   border-color: transparent;
-  color: var(--fg-muted);
+  color: var(--fg-2);
+  font-weight: 600;
 }
 
 .btn.ghost:hover {
-  background: var(--accent-soft);
-  border-color: transparent;
-  color: var(--accent);
+  background: var(--surface-2);
+  color: var(--fg);
+  filter: none;
 }
 
 /* .danger: 위험 액션(삭제 등) */
 .btn.danger {
   background: var(--danger);
   border-color: var(--danger);
-  color: var(--accent-fg-on);
-}
-
-.btn.danger:hover {
-  background: var(--danger);
-  border-color: var(--danger);
-  filter: brightness(1.06);
+  color: #fff;
 }
 
 /* .sm: 작게 */
 .btn.sm {
   min-height: 32px;
-  padding: 4px 10px;
-  font-size: 13px;
+  padding: 7px 12px;
+  font-size: 12.5px;
 }
 
 .btn:disabled {
   opacity: .5;
   cursor: not-allowed;
-}
-
-.btn:disabled:hover {
-  background: var(--accent);
-  border-color: var(--accent);
   filter: none;
 }
 
-.btn.secondary:disabled:hover {
-  background: var(--surface);
-  border-color: var(--border-strong);
-}
-
-.btn.ghost:disabled:hover {
-  background: transparent;
-  color: var(--fg-muted);
-}
-
-.btn.danger:disabled:hover {
-  background: var(--danger);
-  border-color: var(--danger);
+.btn:disabled:hover {
+  filter: none;
 }
 
 /* --------------------------------------------------------------------------
@@ -291,11 +321,12 @@ input[type="text"],
 input[type="number"],
 input[type="file"] {
   font: inherit;
+  font-size: 14px;
   color: var(--fg);
   background: var(--surface);
-  border: 1px solid var(--border-strong);
+  border: 1px solid var(--border-2);
   border-radius: var(--radius-s);
-  padding: 8px 10px;
+  padding: 10px 12px;
   transition: border-color .15s ease, box-shadow .15s ease;
 }
 
@@ -325,27 +356,26 @@ select:disabled {
 
 input::placeholder,
 textarea::placeholder {
-  color: var(--fg-faint);
+  color: var(--fg-3);
 }
 
-/* 파일 인풋 버튼 부분 */
 input[type="file"] {
   padding: 6px 8px;
 }
 
 input[type="file"]::file-selector-button {
   font: inherit;
-  font-weight: 500;
+  font-weight: 600;
   margin-right: 10px;
-  padding: 5px 10px;
-  border: 1px solid var(--border-strong);
+  padding: 6px 11px;
+  border: 1px solid var(--border-2);
   border-radius: var(--radius-s);
   background: var(--surface-2);
   color: var(--fg);
   cursor: pointer;
 }
 
-/* .field: 캡션(span/label) + 컨트롤 세로 스택. 인라인 행은 화면별 전용 클래스가 담당. */
+/* .field: 캡션(span/label) + 컨트롤 세로 스택 */
 .field {
   display: flex;
   flex-direction: column;
@@ -353,11 +383,11 @@ input[type="file"]::file-selector-button {
 }
 
 .field > span {
-  font-size: 13px;
-  color: var(--fg-muted);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fg-2);
 }
 
-/* select 에 .field 가 직접 붙는 경우(닉네임 변경 등) — flex 렌더 회피 */
 select.field {
   display: block;
   width: 100%;
@@ -370,46 +400,47 @@ select.field {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  font-size: 12px;
+  font-size: 10.5px;
   font-weight: 600;
   line-height: 1;
-  padding: 4px 8px;
+  padding: 4px 9px;
   border-radius: 999px;
   background: var(--surface-2);
-  color: var(--fg-muted);
+  color: var(--fg-2);
+  white-space: nowrap;
 }
 
-.badge.ok      { background: var(--ok-soft);     color: var(--ok); }
-.badge.warn    { background: var(--warn-soft);   color: var(--warn); }
-.badge.danger  { background: var(--danger-soft); color: var(--danger); }
-.badge.muted   { background: var(--surface-2);   color: var(--fg-muted); }
-.badge.pass    { background: var(--ok-soft);     color: var(--ok); }
-.badge.fail    { background: var(--danger-soft); color: var(--danger); }
+.badge.ok,
+.badge.pass    { background: var(--success-weak); color: var(--success); }
+.badge.warn    { background: var(--warn-weak);    color: var(--warn); }
+.badge.danger,
+.badge.fail    { background: var(--danger-weak);  color: var(--danger); }
+.badge.muted   { background: var(--surface-2);    color: var(--fg-3); }
+.badge.accent  { background: var(--accent-weak);  color: var(--accent); }
 
 /* 안내 카드 — warn 틴트 */
 .exam-notice {
   padding: 12px 14px;
   border: 1px solid var(--warn);
   border-radius: var(--radius-m);
-  background: var(--warn-soft);
+  background: var(--warn-weak);
   color: var(--warn);
-  font-size: 14px;
+  font-size: 13px;
+  line-height: 1.5;
 }
 
 .loading,
 .status-msg {
-  color: var(--fg-muted);
-  font-size: 14px;
+  color: var(--fg-2);
+  font-size: 13px;
 }
 
-.status-msg.ok {
-  color: var(--ok);
-}
+.status-msg.ok { color: var(--success); }
 
-/* .error-text 는 .status-msg 이후 선언 — 병기(status-msg error-text) 시 danger 우선 */
+/* .error-text 는 .status-msg 이후 — 병기 시 danger 우선 */
 .error-text {
   color: var(--danger);
-  font-size: 14px;
+  font-size: 13px;
 }
 
 /* --------------------------------------------------------------------------
@@ -436,17 +467,16 @@ select.field {
   animation: skeleton-shimmer 1.3s ease-in-out infinite;
 }
 
-@keyframes skeleton-shimmer {
-  100% { transform: translateX(100%); }
-}
+@keyframes skeleton-shimmer { 100% { transform: translateX(100%); } }
 
 /* --------------------------------------------------------------------------
-   공용 — 모달(닉네임 삭제 등)
+   공용 — 모달(다이얼로그 셸: 라운드 18 · shadow-lg · qpop)
+   화면별 다이얼로그는 이 셸 위에 전용 스타일을 얹는다.
    -------------------------------------------------------------------------- */
 .modal-overlay {
   position: fixed;
   inset: 0;
-  z-index: 900;
+  z-index: 80;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -458,16 +488,17 @@ select.field {
 .modal-box {
   width: 100%;
   max-width: 460px;
-  padding: 20px 22px;
+  padding: 24px;
   border: 1px solid var(--border);
-  border-radius: var(--radius-l);
+  border-radius: var(--radius-xl);
   background: var(--surface);
-  box-shadow: var(--shadow-2);
+  box-shadow: var(--shadow-lg);
+  animation: qpop .16s;
 }
 
 .modal-box h3 {
   margin: 0 0 12px;
-  font-size: 16px;
+  font-size: 17px;
   font-weight: 700;
 }
 
@@ -476,15 +507,16 @@ select.field {
 }
 
 .modal-box .field > label {
-  font-size: 13px;
-  color: var(--fg-muted);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fg-2);
 }
 
 /* 삭제 대상(usage) 목록 */
 .usage-area {
   margin: 4px 0 12px;
-  font-size: 14px;
-  color: var(--fg-muted);
+  font-size: 13px;
+  color: var(--fg-2);
 }
 
 .usage-area ul {
@@ -500,20 +532,21 @@ select.field {
 /* 경고 스트립 */
 .modal-warn {
   margin: 12px 0;
-  padding: 10px 12px;
-  border: 1px solid var(--warn);
+  padding: 11px 13px;
   border-radius: var(--radius-m);
-  background: var(--warn-soft);
-  color: var(--warn);
-  font-size: 13px;
+  background: var(--danger-weak);
+  color: var(--danger);
+  font-size: 12.5px;
+  line-height: 1.55;
 }
 
 .modal-actions {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 9px;
   flex-wrap: wrap;
-  margin-top: 16px;
+  justify-content: flex-end;
+  margin-top: 18px;
 }
 
 /* --------------------------------------------------------------------------
@@ -535,41 +568,22 @@ select.field {
 .toast {
   pointer-events: auto;
   max-width: 100%;
-  padding: 10px 14px;
+  padding: 11px 15px;
   border: 1px solid var(--border);
   border-radius: var(--radius-m);
   background: var(--surface);
   color: var(--fg);
-  box-shadow: var(--shadow-2);
-  font-size: 14px;
+  box-shadow: var(--shadow-lg);
+  font-size: 13.5px;
   cursor: pointer;
   opacity: 0;
   transform: translateY(8px);
   transition: opacity .2s ease, transform .2s ease;
 }
 
-.toast-in {
-  opacity: 1;
-  transform: translateY(0);
-}
+.toast-in { opacity: 1; transform: translateY(0); }
+.toast-out { opacity: 0; transform: translateY(8px); }
 
-.toast-out {
-  opacity: 0;
-  transform: translateY(8px);
-}
-
-.toast-info {
-  border-color: var(--border-strong);
-}
-
-.toast-ok {
-  border-color: var(--ok);
-  background: var(--ok-soft);
-  color: var(--ok);
-}
-
-.toast-error {
-  border-color: var(--danger);
-  background: var(--danger-soft);
-  color: var(--danger);
-}
+.toast-info { border-color: var(--border-2); }
+.toast-ok { border-color: var(--success); background: var(--success-weak); color: var(--success); }
+.toast-error { border-color: var(--danger); background: var(--danger-weak); color: var(--danger); }

@@ -7,44 +7,35 @@
     <link rel="stylesheet" href="/css/base.css" />
     <link rel="stylesheet" href="/css/layout.css" />
     <link rel="stylesheet" href="/css/views.css" />
+    <link rel="stylesheet" href="/css/screens.css" />
   </head>
   <body>
-    <header class="app-header shell-header">
-      <div class="brand">
-        <button
-          id="sidebar-toggle"
-          class="btn ghost sm sidebar-toggle"
-          type="button"
-          aria-label="사이드바 열기/닫기"
-        >☰</button>
+    <!-- 감사 경고 배너: 허용 경계 밖 파일 수정이 원복됐을 때(SSE audit-warning) 노출 -->
+    <div id="audit-banner" class="audit-banner" hidden></div>
+
+    <!-- 전역 헤더(온보딩에서는 숨김) -->
+    <header id="app-header" class="app-header" hidden>
+      <div class="hdr-left">
         <span class="brand-mark" aria-hidden="true">Q</span>
-        <h1>Q-Net 기출 풀이</h1>
+        <nav id="breadcrumb" class="crumbs" aria-label="경로"></nav>
       </div>
-      <div class="shell-header-actions">
-        <span id="cli-dot" class="cli-dot" hidden></span>
+      <div class="hdr-right">
+        <span id="sse-badge" class="sse-badge" title="실시간 반영(SSE)"></span>
+        <div id="cli-badges" class="cli-badges" aria-label="CLI 상태"></div>
         <button
           id="theme-toggle"
-          class="btn ghost sm theme-toggle"
+          class="icon-btn theme-toggle"
           type="button"
           aria-label="테마 전환"
-        >◐</button>
+        ></button>
+        <span class="hdr-divider" aria-hidden="true"></span>
         <div id="nickname-area" class="nickname-area"></div>
       </div>
     </header>
 
-    <!-- CLI(agy·claude) 감지 상태 배너 -->
-    <div id="cli-banner" class="cli-banner" hidden></div>
-
-    <div class="shell-body">
-      <aside id="sidebar" class="shell-sidebar" aria-label="자격증 탐색"></aside>
-      <main id="app" class="app-main shell-main">
-        <p class="loading">불러오는 중…</p>
-      </main>
-    </div>
-
-    <footer class="app-footer">
-      <span id="conn-status" class="conn-status">연결 대기</span>
-    </footer>
+    <main id="app" class="app-main qsc">
+      <p class="loading" style="padding: 40px">불러오는 중…</p>
+    </main>
 
     <script type="module" src="/js/app.js"></script>
   </body>
