@@ -305,3 +305,82 @@ test('입력 검증: 예약된 디렉토리명을 종류로 → 400 (blocklist)'
     started.server.close();
   }
 });
+
+test('정리 승인(요청/잡 분리): 즉시 202+jobId → 완료 시 record-done 통지 + 상태 조회', async () => {
+  const rA = fs.mkdtempSync(path.join(os.tmpdir(), 'qnet-approve-'));
+  const nickMod = require('../server/nickname');
+  const origGet = nickMod.getNickname;
+  nickMod.getNickname = () => '테스터'; // 실제 config 오염 없이 닉네임 스텁.
+  const { deps, events } = makeDeps(rA, { chat: true, record: true });
+  const started = await 앱시작(deps);
+  try {
+    const t0 = Date.now();
+    const res = await fetch(`${started.base}/api/chat/approve`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        grade: '정보처리',
+        cert: '정보처리기사',
+        examId: '2023-1-필기',
+        qno: '5',
+        conversation: '[사용자] 질문\n[어시스턴트] 답변',
+        destinations: { note: true, shared: true },
+      }),
+    });
+    const data = await res.json();
+    // 요청/잡 분리: 잡 완주를 기다리지 않고 즉시 202+jobId 로 반환.
+    assert.strictEqual(res.status, 202, JSON.stringify(data));
+    assert.ok(data.jobId, 'jobId 가 반환돼야 함');
+    assert.ok(Date.now() - t0 < 5000, '요청은 잡 완료를 기다리지 않고 즉시 반환해야 함');
+
+    // 완료는 SSE(record-done) 로 통지된다(fake-claude 는 즉시 성공 종료 → 감사 clean).
+    let done = null;
+    for (let i = 0; i < 100 && !done; i += 1) {
+      done = events.find((e) => e.event === 'record-done' && e.payload.jobId === data.jobId);
+      if (!done) await new Promise((r) => setTimeout(r, 20));
+    }
+    assert.ok(done, 'record-done 이 브로드캐스트돼야 함');
+    assert.strictEqual(done.payload.ok, true, JSON.stringify(done.payload));
+
+    // 상태 조회 폴백(GET).
+    const st = await fetch(`${started.base}/api/chat/approve/${data.jobId}`);
+    const stData = await st.json();
+    assert.strictEqual(st.status, 200);
+    assert.strictEqual(stData.status, 'done');
+    assert.strictEqual(stData.ok, true, JSON.stringify(stData));
+
+    // 없는 jobId 는 404.
+    const miss = await fetch(`${started.base}/api/chat/approve/nope-nope`);
+    assert.strictEqual(miss.status, 404);
+  } finally {
+    nickMod.getNickname = origGet;
+    started.server.close();
+  }
+});
+
+test('정리 승인: 목적지 0개면 400(잡을 만들지 않음)', async () => {
+  const rB = fs.mkdtempSync(path.join(os.tmpdir(), 'qnet-approve-'));
+  const nickMod = require('../server/nickname');
+  const origGet = nickMod.getNickname;
+  nickMod.getNickname = () => '테스터';
+  const { deps } = makeDeps(rB, { chat: true, record: true });
+  const started = await 앱시작(deps);
+  try {
+    const res = await fetch(`${started.base}/api/chat/approve`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        grade: '정보처리',
+        cert: '정보처리기사',
+        examId: '2023-1-필기',
+        qno: '5',
+        conversation: 'x',
+        destinations: { note: false, shared: false },
+      }),
+    });
+    assert.strictEqual(res.status, 400);
+  } finally {
+    nickMod.getNickname = origGet;
+    started.server.close();
+  }
+});

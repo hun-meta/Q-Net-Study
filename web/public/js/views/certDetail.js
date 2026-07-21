@@ -3,7 +3,7 @@
 
 import { renderUploadPanel } from '../components/upload.js';
 import { renderMicroworldPanel } from '../components/microworld.js';
-import { solveHash, viewHash, certTrendHash } from '../router.js';
+import { solveHash, viewHash, certTrendHash, certNotesHash } from '../router.js';
 import { toast } from '../components/toast.js';
 
 const enc = encodeURIComponent;
@@ -82,6 +82,15 @@ export async function mount(container, params) {
   const sub = el('p', 'xl-sub', '참여자 정보 불러오는 중…');
   view.headSubEl = sub;
   headL.append(title, sub);
+  const notesBtn = el('button', 'xl-trend-btn');
+  notesBtn.type = 'button';
+  notesBtn.append(
+    svg('<svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="var(--accent)" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 2.5h6l2 2v9h-8z"></path><path d="M6 6h4M6 8.5h4M6 11h2.5"></path></svg>'),
+    document.createTextNode('정리 모음')
+  );
+  notesBtn.addEventListener('click', () => {
+    location.hash = certNotesHash(grade, cert);
+  });
   const trendBtn = el('button', 'xl-trend-btn');
   trendBtn.type = 'button';
   trendBtn.append(
@@ -91,7 +100,9 @@ export async function mount(container, params) {
   trendBtn.addEventListener('click', () => {
     location.hash = certTrendHash(grade, cert);
   });
-  head.append(headL, trendBtn);
+  const headActions = el('div', 'xl-head-actions');
+  headActions.append(notesBtn, trendBtn);
+  head.append(headL, headActions);
 
   // 2열 그리드.
   const grid = el('div', 'xl-grid');

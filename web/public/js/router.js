@@ -19,6 +19,7 @@ const VIEWS = {
   result: () => import('./views/result.js'),
   trend: () => import('./views/trend.js'),
   certTrend: () => import('./views/certTrend.js'),
+  certNotes: () => import('./views/certNotes.js'),
 };
 
 let currentView = null;
@@ -61,6 +62,9 @@ export function certHash(grade, cert) {
 export function certTrendHash(grade, cert) {
   return `#/cert/${encodeURIComponent(grade)}/${encodeURIComponent(cert)}/trend`;
 }
+export function certNotesHash(grade, cert) {
+  return `#/cert/${encodeURIComponent(grade)}/${encodeURIComponent(cert)}/notes`;
+}
 export function solveHash(grade, cert, examId) {
   return `#/solve/${encodeURIComponent(grade)}/${encodeURIComponent(cert)}/${encodeURIComponent(examId)}`;
 }
@@ -78,6 +82,9 @@ function resolveRoute(segs) {
   const cert = (g, c) => ({ grade: g, cert: c });
   if (segs[0] === 'cert' && segs[1] && segs[2] && segs[3] === 'trend') {
     return { name: 'certTrend', params: { grade: segs[1], cert: segs[2] }, cert: cert(segs[1], segs[2]) };
+  }
+  if (segs[0] === 'cert' && segs[1] && segs[2] && segs[3] === 'notes') {
+    return { name: 'certNotes', params: { grade: segs[1], cert: segs[2] }, cert: cert(segs[1], segs[2]) };
   }
   if (segs[0] === 'cert' && segs[1] && segs[2]) {
     return { name: 'examlist', params: { grade: segs[1], cert: segs[2] }, cert: cert(segs[1], segs[2]) };
@@ -118,6 +125,8 @@ function buildCrumbs(route) {
       return [root, { label: c ? c.cert : '자격증', current: true }];
     case 'certTrend':
       return [root, certLink, { label: '성적 추이', current: true }];
+    case 'certNotes':
+      return [root, certLink, { label: '정리 모음', current: true }];
     case 'solve':
       return [root, certLink, { label: route.params.mode === 'view' ? '답 포함 열람' : '풀이', current: true }];
     case 'result':

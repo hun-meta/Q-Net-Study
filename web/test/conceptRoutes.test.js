@@ -123,3 +123,55 @@ test('parseSignatureSections/extractSection 단위 동작', () => {
   const sec = concept.extractSection('## X\n내용X\n## Y\n내용Y\n', 'X');
   assert.equal(sec, '## X\n내용X');
 });
+
+test('GET /api/notes: 참여자 전원 개념 노트(타인 포함) + 공유 풀이 + 본인여부', async (t) => {
+  const repoRoot = seedRepo();
+  const nickMod = require('../server/nickname');
+  const origGet = nickMod.getNickname;
+  nickMod.getNickname = () => 'hun'; // 실제 config 오염 없이 닉네임 스텁.
+  const { server, port } = await startServer(repoRoot);
+  t.after(() => {
+    nickMod.getNickname = origGet;
+    server.close();
+    fs.rmSync(repoRoot, { recursive: true, force: true });
+  });
+
+  const res = await request(port, { reqPath: '/api/notes/기사/정보처리기사' });
+  assert.equal(res.status, 200);
+  const data = JSON.parse(res.body);
+
+  // 참여자 전원 노출.
+  assert.deepEqual(data.participants.slice().sort(), ['hun', 'sora']);
+
+  // 개념 노트: 내 것 + 타인(sora) 모두 열람. 본인여부 구분.
+  assert.equal(data.노트.length, 2);
+  const hunNote = data.노트.find((n) => n.닉네임 === 'hun');
+  const soraNote = data.노트.find((n) => n.닉네임 === 'sora');
+  assert.ok(hunNote && soraNote, '내 노트와 타인 노트가 모두 있어야 함');
+  assert.equal(hunNote.본인여부, true);
+  assert.equal(soraNote.본인여부, false); // 타인 정리도 열람되되 본인여부는 false
+  assert.equal(hunNote.과목, '소프트웨어설계');
+  assert.equal(hunNote.항목, '01-요구사항확인');
+  assert.match(hunNote.본문md, /요구공학/);
+  assert.ok(hunNote.기출참조.includes('2023-1-필기 #23'), '🔁 역참조가 추출돼야 함');
+
+  // 공유 풀이: 서명 섹션별로 분해(hun + sora).
+  assert.equal(data.풀이.length, 2);
+  assert.deepEqual(data.풀이.map((p) => p.닉네임).slice().sort(), ['hun', 'sora']);
+  assert.equal(data.풀이[0].examId, '2023-1-필기');
+  assert.equal(String(data.풀이[0].문번), '23');
+});
+
+test('GET /api/notes: 없는 자격증 404 · 경로탈출 세그먼트 400', async (t) => {
+  const repoRoot = seedRepo();
+  const { server, port } = await startServer(repoRoot);
+  t.after(() => {
+    server.close();
+    fs.rmSync(repoRoot, { recursive: true, force: true });
+  });
+
+  const nf = await request(port, { reqPath: '/api/notes/기사/없는자격증' });
+  assert.equal(nf.status, 404);
+  const bad = await request(port, { reqPath: '/api/notes/..%2F..%2Fetc/x' });
+  assert.equal(bad.status, 400);
+});

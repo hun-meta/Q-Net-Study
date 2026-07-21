@@ -393,6 +393,32 @@ async function readNdjson(res, onEvent) {
   }
 }
 
+// 정리 잡 완료(record-done)를 jobId 로 구독해 결과 토스트를 띄운다.
+// SSE 를 놓쳐도 영구 대기하지 않도록 가드 타임아웃(잡 상한 10분 + 여유)을 둔다.
+function waitForRecordDone(jobId, toast) {
+  let guard = null;
+  const onDone = (e) => {
+    const d = (e && e.detail) || {};
+    if (d.jobId !== jobId) return;
+    window.removeEventListener('qnet:record-done', onDone);
+    if (guard) clearTimeout(guard);
+    if (d.ok) {
+      toast('정리 완료 — 개념 보기에 반영됐어요.', 'ok');
+    } else if (d.timedOut) {
+      toast('정리가 시간 초과로 중단됐어요(10분). 대화를 줄여 다시 시도해 주세요.', 'error');
+    } else if (d.audit && d.audit.clean === false) {
+      toast('감사 경고 — 일부 변경이 원복됐어요.', 'error');
+    } else {
+      toast(d.error || '정리 실패 — 다시 시도해 주세요.', 'error');
+    }
+  };
+  window.addEventListener('qnet:record-done', onDone);
+  guard = setTimeout(() => {
+    window.removeEventListener('qnet:record-done', onDone);
+    toast('정리 상태를 확인하지 못했어요. 개념 보기에서 반영 여부를 확인해 주세요.', 'info');
+  }, 11 * 60 * 1000);
+}
+
 // ── 승인 다이얼로그(정리해줘 → 저장 위치) ────────────────────────────────────
 function openApproveDialog(ctx, qno, history) {
   const overlay = el('div', 'modal-overlay');
@@ -430,46 +456,40 @@ function openApproveDialog(ctx, qno, history) {
   actions.append(cancel, confirm);
   box.append(actions);
 
-  confirm.addEventListener('click', async () => {
+  confirm.addEventListener('click', () => {
     if (!optNote.input.checked && !optShared.input.checked) {
       status.hidden = false;
       status.className = 'apv-status err';
       status.textContent = '목적지를 하나 이상 선택하세요.';
       return;
     }
-    // 로딩 상태.
-    box.innerHTML =
-      '<div class="apv-loading"><svg width="30" height="30" viewBox="0 0 16 16" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linecap="round" style="animation:qspin .8s linear infinite;margin-bottom:14px"><path d="M8 1.6a6.4 6.4 0 1 1-6.3 5.2"></path></svg><div class="apv-loading-title">정리 중…</div><div class="apv-loading-sub">claude가 노트를 작성하고 있어요</div></div>';
-    try {
-      const conversation = history
-        .map((h) => `[${h.role === 'assistant' ? '어시스턴트' : '사용자'}] ${h.text}`)
-        .join('\n');
-      const res = await apiFetch('/api/chat/approve', {
-        method: 'POST',
-        body: {
-          grade: ctx.grade,
-          cert: ctx.cert,
-          examId: ctx.examId,
-          qno: String(qno),
-          conversation,
-          destinations: { note: optNote.input.checked, shared: optShared.input.checked },
-        },
-      });
-      const data = await res.json().catch(() => ({}));
-      overlay.remove();
-      if (data.audit && !data.audit.clean) {
-        window.dispatchEvent(new CustomEvent('qnet:toast', { detail: { message: '감사 경고 — 일부 변경이 원복됐어요.', type: 'error' } }));
-      } else if (res.ok && data.ok) {
-        window.dispatchEvent(new CustomEvent('qnet:toast', { detail: { message: '기록 완료 — 개념 보기에 반영됩니다.', type: 'ok' } }));
-        // 개념 탭으로 전환해 반영 확인.
-        if (active) active.switchTab('concept');
-      } else {
-        window.dispatchEvent(new CustomEvent('qnet:toast', { detail: { message: data.error || '기록 처리됨(확인 필요).', type: 'info' } }));
-      }
-    } catch (e) {
-      overlay.remove();
-      window.dispatchEvent(new CustomEvent('qnet:toast', { detail: { message: e.message, type: 'error' } }));
-    }
+    // 승인 시점의 대화를 스냅샷(이후 채팅이 이어져도 이 내용으로 고정).
+    const conversation = history
+      .map((h) => `[${h.role === 'assistant' ? '어시스턴트' : '사용자'}] ${h.text}`)
+      .join('\n');
+    const destinations = { note: optNote.input.checked, shared: optShared.input.checked };
+
+    // 요청/잡 분리: POST 는 즉시 202+jobId 로 반환한다. 다이얼로그를 닫고,
+    // 완료는 SSE 'record-done'(qnet:record-done)에서 해당 jobId 를 구독해 통지받는다.
+    // (잡은 서버 공유 큐에서 계속 돌므로 요청 수명·10분 타임아웃과 무관하게 완주한다.)
+    overlay.remove();
+    const toast = (message, type) =>
+      window.dispatchEvent(new CustomEvent('qnet:toast', { detail: { message, type } }));
+
+    apiFetch('/api/chat/approve', {
+      method: 'POST',
+      body: { grade: ctx.grade, cert: ctx.cert, examId: ctx.examId, qno: String(qno), conversation, destinations },
+    })
+      .then(async (res) => {
+        const data = await res.json().catch(() => ({}));
+        if (res.status !== 202 || !data.jobId) {
+          toast(data.error || '정리 요청을 시작하지 못했어요.', 'error');
+          return;
+        }
+        toast('정리를 백그라운드에서 진행해요… 완료되면 알려드릴게요.', 'info');
+        waitForRecordDone(data.jobId, toast);
+      })
+      .catch((e) => toast(e.message, 'error'));
   });
 
   overlay.append(box);

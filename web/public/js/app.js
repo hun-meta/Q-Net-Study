@@ -199,6 +199,17 @@ function connectSse() {
     }
   });
 
+  // 정리 완료(record-done): 요청/잡 분리로 백그라운드에서 끝난 정리 잡의 결과.
+  // 패널(승인 다이얼로그)이 jobId 로 자기 잡을 구독해 완료/실패 토스트를 띄운다.
+  es.addEventListener('record-done', (evt) => {
+    try {
+      const detail = JSON.parse(evt.data); // { jobId, examId, qno, ok, timedOut?, isError?, audit?, error? }
+      window.dispatchEvent(new CustomEvent('qnet:record-done', { detail }));
+    } catch (_e) {
+      /* noop */
+    }
+  });
+
   return es;
 }
 

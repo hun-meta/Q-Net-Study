@@ -16,9 +16,12 @@
 //   agy:    `-p` 텍스트만, --output-format 미지원 → stdout 청크 릴레이만 가능.
 
 const { spawn } = require('child_process');
+const logger = require('./logger');
 
-// 잡 타임아웃(ms) — 계획 명시: 추출 5분 / 정리 2분 / 챗 3분 / 마이크로월드 생성 5분.
-const TIMEOUTS = Object.freeze({ extract: 300000, record: 120000, chat: 180000, microworld: 300000 });
+// 잡 타임아웃(ms) — 추출 5분 / 정리 10분 / 챗 3분 / 마이크로월드 생성 5분.
+// 정리(record)는 문항 PDF 판독 + 출제기준 매핑 + 노트·풀이 2곳 쓰기로 가장 무거워,
+// 기존 2분(120s)으로는 자주 미완주(타임아웃 kill)했다 — 넉넉히 10분으로 상향.
+const TIMEOUTS = Object.freeze({ extract: 300000, record: 600000, chat: 180000, microworld: 300000 });
 const KILL_GRACE_MS = 2000;
 
 // config 명령 문자열("agy --dangerously-skip-permissions")을 { file, baseArgs }로 분해.
@@ -35,6 +38,8 @@ function parseCommand(command) {
 // 반환: Promise<{ code, signal, stdout, stderr, timedOut }>
 function runProcess(file, args, opts) {
   const o = opts || {};
+  const label = o.label || 'proc';
+  const startedAt = Date.now();
   return new Promise((resolve, reject) => {
     if (!file) {
       reject(new Error('CLI 실행 파일이 지정되지 않았습니다.'));
@@ -55,6 +60,7 @@ function runProcess(file, args, opts) {
 
     const timer = setTimeout(() => {
       timedOut = true;
+      logger.warn(`${label} 타임아웃 — kill`, { file, timeoutMs: o.timeoutMs || TIMEOUTS.record, ms: Date.now() - startedAt });
       try {
         child.kill('SIGTERM');
       } catch (_e) {
@@ -85,12 +91,21 @@ function runProcess(file, args, opts) {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      logger.error(`${label} spawn 오류`, { file, error: err.message });
       reject(err);
     });
     child.on('close', (code, signal) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      logger.info(`${label} 종료`, {
+        code,
+        signal,
+        timedOut,
+        ms: Date.now() - startedAt,
+        stdoutBytes: stdout.length,
+        stderrBytes: stderr.length,
+      });
       resolve({ code, signal, stdout, stderr, timedOut });
     });
 
@@ -306,6 +321,7 @@ function createBridge(deps) {
         cwd: repoRoot,
         timeoutMs: TIMEOUTS.chat,
         onStdout: params.onData,
+        label: 'chat',
       });
       const report = audit.audit(snap, {
         jobKind: 'chat',
@@ -327,6 +343,14 @@ function createBridge(deps) {
       }
       const { file, baseArgs } = recordCmd();
       const prompt = buildRecordPrompt(params);
+      logger.info('record 시작', {
+        examId: params.examId,
+        qno: params.qno,
+        nickname: params.nickname,
+        destinations: Object.keys(params.destinations || {}),
+        auditDestinations: params.auditDestinations || [],
+        timeoutMs: TIMEOUTS.record,
+      });
       const snap = audit.snapshot({
         monitorRoots: params.monitorRoots,
         integrityTargets: params.integrityTargets || [],
@@ -346,7 +370,7 @@ function createBridge(deps) {
           'stream-json',
           '--verbose',
         ],
-        { cwd: repoRoot, timeoutMs: TIMEOUTS.record }
+        { cwd: repoRoot, timeoutMs: TIMEOUTS.record, label: 'record' }
       );
       const parsed = parseClaudeStreamJson(res.stdout);
       // 주의: params.destinations 는 프롬프트용 {note,shared} 객체이고,
@@ -357,6 +381,20 @@ function createBridge(deps) {
         sharedRoots: params.sharedRoots || [],
         nickname: params.nickname,
         repoRoot,
+      });
+      logger.info('record 완료', {
+        examId: params.examId,
+        qno: params.qno,
+        timedOut: res.timedOut,
+        code: res.code,
+        signal: res.signal,
+        isError: parsed.isError,
+        auditClean: report.clean,
+        jobReverted: report.jobReverted,
+        violations: report.violations || [],
+        restored: report.restored || [],
+        unrestorable: report.unrestorable || [],
+        stderrTail: (res.stderr || '').slice(-600),
       });
       return { result: parsed.result, isError: parsed.isError, timedOut: res.timedOut, audit: report };
     });
@@ -396,7 +434,7 @@ function createBridge(deps) {
           'stream-json',
           '--verbose',
         ],
-        { cwd: repoRoot, timeoutMs: TIMEOUTS.extract }
+        { cwd: repoRoot, timeoutMs: TIMEOUTS.extract, label: 'extract' }
       );
       const parsed = parseClaudeStreamJson(res.stdout);
       const report = audit.audit(snap, {
@@ -439,7 +477,7 @@ function createBridge(deps) {
           'stream-json',
           '--verbose',
         ],
-        { cwd: repoRoot, timeoutMs: TIMEOUTS.microworld }
+        { cwd: repoRoot, timeoutMs: TIMEOUTS.microworld, label: 'microworld' }
       );
       const parsed = parseClaudeStreamJson(res.stdout);
       const report = audit.audit(snap, {

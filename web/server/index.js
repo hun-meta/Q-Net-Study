@@ -10,6 +10,7 @@ const config = require('./config');
 const { createApp } = require('./app');
 const { createSseHub } = require('./sse');
 const { startWatcher } = require('./watcher');
+const logger = require('./logger');
 
 // CLI 명령 문자열에서 실행 파일명(첫 토큰)만 추출.
 function binaryOf(command) {
@@ -96,6 +97,7 @@ async function start() {
   const port = await config.findAvailablePort(cfg.port || config.DEFAULT_PORT, config.MAX_PORT);
 
   const server = app.listen(port, '127.0.0.1', () => {
+    logger.info('server 기동', { port, cli, nickname: cfg.nickname || null, logFile: logger.LOG_FILE });
     // 파일 워처 시작(로컬 상태·git·node_modules 무시).
     const watcher = startWatcher(config.REPO_ROOT, hub);
     // 미감지 CLI 자가 회복 폴링(감지 완료 시 자동 종료).

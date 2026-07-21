@@ -13,6 +13,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const express = require('express');
 
 const security = require('./security');
@@ -92,6 +93,20 @@ function router(deps) {
   const r = express.Router();
   const bridge = createBridge({ config, repoRoot, cli });
   const broadcast = hub && typeof hub.broadcast === 'function' ? hub.broadcast : () => {};
+
+  // 정리(record) 잡 레지스트리 — 요청/잡 수명 분리. POST 는 즉시 202+jobId 로 반환하고,
+  // 잡은 공유 큐에서 계속 돌다가 완료 시 SSE 'record-done' 으로 통지한다. 상태는 GET 으로도 조회.
+  // 로컬 단일 사용자 앱이라 인메모리로 충분. 완료분은 상한을 넘으면 오래된 것부터 정리한다.
+  const recordJobs = new Map(); // jobId → { status:'running'|'done', at, examId, qno, result? }
+  const RECORD_JOB_KEEP = 50;
+  function pruneRecordJobs() {
+    if (recordJobs.size <= RECORD_JOB_KEEP) return;
+    const done = [...recordJobs.entries()].filter(([, v]) => v.status === 'done');
+    done.sort((a, b) => a[1].at - b[1].at);
+    while (recordJobs.size > RECORD_JOB_KEEP && done.length) {
+      recordJobs.delete(done.shift()[0]);
+    }
+  }
 
   // CLI 가용성 게이트. 미설치/미로그인 → 503 + 폴백 안내(핵심 루프는 계속 동작).
   function requireCli(role, res) {
@@ -307,14 +322,21 @@ function router(deps) {
 
   // ── 승인 정리(claude 직접 쓰기) ───────────────────────────────────────
   // body: { grade, cert, examId, qno, conversation, destinations:{note,shared} }
-  r.post('/api/chat/approve', async (req, res) => {
+  r.post('/api/chat/approve', (req, res) => {
     if (!requireCli('record', res)) return;
+    let examId;
+    let qno;
+    let nick;
+    let dest;
+    let destinations;
+    let sharedRoots;
+    let conversation;
     try {
       const body = req.body || {};
       const { grade, cert } = 자격증컨텍스트(body);
-      const examId = 안전세그먼트(body.examId, '시험ID');
-      const qno = 안전세그먼트(body.qno, '문번');
-      const nick = nickname.getNickname();
+      examId = 안전세그먼트(body.examId, '시험ID');
+      qno = 안전세그먼트(body.qno, '문번');
+      nick = nickname.getNickname();
       if (!nick) throw httpError(400, '닉네임이 설정되지 않았습니다.');
 
       const wantNote = !body.destinations || body.destinations.note !== false;
@@ -326,9 +348,9 @@ function router(deps) {
       const notesDir = path.join(participant, 'notes');
       const 풀이Dir = path.join(common, '풀이', examId);
 
-      const destinations = [];
-      const sharedRoots = [];
-      const dest = {};
+      destinations = [];
+      sharedRoots = [];
+      dest = {};
       if (wantNote) {
         destinations.push(notesDir);
         dest.note = notesDir;
@@ -338,36 +360,57 @@ function router(deps) {
         sharedRoots.push(풀이Dir);
         dest.shared = path.join(풀이Dir, `${qno}.md`);
       }
+      conversation = body.conversation;
+    } catch (err) {
+      return res.status(err.status || 400).json({ error: err.message });
+    }
 
-      const today = new Date().toISOString().slice(0, 10);
-      const job = await bridge.record({
+    // 요청/잡 분리: 잡을 공유 큐에 올리고(직렬화·감사 불변식 유지) 즉시 202 로 반환한다.
+    // 완료(성공/타임아웃/원복/오류)는 SSE 'record-done' 으로 통지하고 레지스트리에 남긴다.
+    const jobId = crypto.randomUUID();
+    recordJobs.set(jobId, { status: 'running', at: Date.now(), examId, qno });
+    pruneRecordJobs();
+
+    const today = new Date().toISOString().slice(0, 10);
+    bridge
+      .record({
         examId,
         qno,
-        conversation: body.conversation,
+        conversation,
         destinations: dest, // 프롬프트용 {note,shared} 경로 객체
         nickname: nick,
         today,
         // F1: record 도 --add-dir repoRoot 로 전 저장소 쓰기가 가능하므로 전역 감시.
-        // 승인 목적지(auditDestinations) 밖 변경 — 공유 정답 키·타 참여자 노트 변조 등 —은
-        // 경계 위반으로 잡 전체 원자 원복된다.
+        // 승인 목적지(auditDestinations) 밖 변경은 경계 위반으로 잡 전체 원자 원복된다.
         monitorRoots: [repoRoot],
         auditDestinations: destinations, // 감사용 목적지 디렉토리 배열(allowlist)
         sharedRoots,
         integrityTargets: 무결성대상(repoRoot),
+      })
+      .then((job) => {
+        const ok = job.audit.clean && !job.isError && !job.timedOut;
+        const result = { ok, timedOut: job.timedOut, isError: job.isError, audit: job.audit };
+        recordJobs.set(jobId, { status: 'done', at: Date.now(), examId, qno, result });
+        if (!job.audit.clean) {
+          broadcast('audit-warning', { where: 'record', violations: job.audit.violations });
+        }
+        broadcast('fs-change', { kind: 'record', examId, qno });
+        broadcast('record-done', { jobId, examId, qno, ...result });
+      })
+      .catch((err) => {
+        const result = { ok: false, error: err.message };
+        recordJobs.set(jobId, { status: 'done', at: Date.now(), examId, qno, result });
+        broadcast('record-done', { jobId, examId, qno, ...result });
       });
 
-      if (!job.audit.clean) {
-        broadcast('audit-warning', { where: 'record', violations: job.audit.violations });
-      }
-      broadcast('fs-change', { kind: 'record', examId, qno });
-      return res.json({
-        ok: job.audit.clean && !job.isError,
-        timedOut: job.timedOut,
-        audit: job.audit,
-      });
-    } catch (err) {
-      return res.status(err.status || 500).json({ error: err.message });
-    }
+    return res.status(202).json({ jobId, queued: true });
+  });
+
+  // 정리 잡 상태 조회(SSE 를 놓쳤을 때 폴백). GET 이라 토큰 게이트 밖(읽기 전용·비민감).
+  r.get('/api/chat/approve/:jobId', (req, res) => {
+    const j = recordJobs.get(req.params.jobId);
+    if (!j) return res.status(404).json({ error: '잡을 찾을 수 없습니다(만료되었거나 없음).' });
+    return res.json({ status: j.status, examId: j.examId, qno: j.qno, ...(j.result || {}) });
   });
 
   return r;
