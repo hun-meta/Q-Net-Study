@@ -13,6 +13,24 @@ const prompt = idx >= 0 ? argv[idx + 1] || '' : '';
 
 // 추출 잡: "출력 파일(반드시 이 경로에만 작성): <path>" 라인에서 경로 추출.
 const m = prompt.match(/출력 파일\(반드시 이 경로에만 작성\):\s*(.+)/);
+
+// 마이크로월드 생성 잡: 같은 출력 경로 라인 + "마이크로월드로 작성" 게이트 → 최소 HTML 작성.
+if (m && /마이크로월드로 작성/.test(prompt)) {
+  const htmlPath = m[1].trim();
+  const html = [
+    '<!doctype html>',
+    '<html lang="ko"><head><meta charset="utf-8">',
+    '<title>테스트 마이크로월드</title></head>',
+    '<body><h1>테스트 개념 시뮬레이션</h1>',
+    '<p>fake-claude 가 생성한 최소 자체 완결 HTML.</p>',
+    '<script>document.title = document.title;</script>',
+    '</body></html>',
+    '',
+  ].join('\n');
+  fs.mkdirSync(path.dirname(htmlPath), { recursive: true });
+  fs.writeFileSync(htmlPath, html, 'utf8');
+}
+
 if (m && /정답 md 파일 작성/.test(prompt)) {
   const answerPath = m[1].trim();
   const md = [

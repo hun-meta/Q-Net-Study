@@ -17,8 +17,8 @@
 
 const { spawn } = require('child_process');
 
-// 잡 타임아웃(ms) — 계획 명시: 추출 5분 / 정리 2분 / 챗 3분.
-const TIMEOUTS = Object.freeze({ extract: 300000, record: 120000, chat: 180000 });
+// 잡 타임아웃(ms) — 계획 명시: 추출 5분 / 정리 2분 / 챗 3분 / 마이크로월드 생성 5분.
+const TIMEOUTS = Object.freeze({ extract: 300000, record: 120000, chat: 180000, microworld: 300000 });
 const KILL_GRACE_MS = 2000;
 
 // config 명령 문자열("agy --dangerously-skip-permissions")을 { file, baseArgs }로 분해.
@@ -230,6 +230,33 @@ function buildExtractPrompt({ pdfPath, answerPath, examId }) {
   ].join('\n');
 }
 
+// 마이크로월드 생성 프롬프트: 시험 개념을 조작 가능한 단일 HTML 시뮬레이션으로 작성.
+// 산출물은 웹 앱이 샌드박스 iframe(allow-scripts, same-origin 없음)으로 임베드하므로
+// localStorage·network 사용 금지가 필수다.
+function buildMicroworldPrompt({ htmlPath, 과목, 개념, 출제기준Path, contextText }) {
+  return [
+    '# 작업: 자격증 시험 개념을 "직접 조작하며 이해하는" 단일 HTML 마이크로월드로 작성',
+    `- 과목: ${과목}`,
+    `- 개념/주제: ${개념}`,
+    `- 출력 파일(반드시 이 경로에만 작성): ${htmlPath}`,
+    출제기준Path ? `- 참고 출제기준(읽기 전용): ${출제기준Path} — 이 개념이 속한 세부항목 맥락을 확인하라.` : '',
+    contextText ? `- 추가 맥락:\n${String(contextText).slice(0, 4000)}` : '',
+    '',
+    '# 마이크로월드 설계 원칙(반드시 준수)',
+    '- 단일 자체 완결 HTML 하나만 작성한다. CSS·JS 인라인, 외부 CDN/네트워크/의존성 0.',
+    '- localStorage·sessionStorage·fetch·XHR·외부 리소스를 절대 쓰지 않는다(샌드박스 iframe에서 동작해야 함).',
+    '- 열자마자 의미 있는 기본 예시가 채워져 바로 돌아가게 한다(빈 화면 금지).',
+    '- 사용자가 값을 바꾸거나(입력·슬라이더) 단계를 스크럽하면 내부 상태가 시각적으로 전개되게 한다.',
+    '- 다이어그램은 ASCII 금지 — HTML/SVG/Canvas로 그린다. 라이트/다크(prefers-color-scheme) 대응, 모바일 반응형.',
+    '- 상단에 개념 한 줄 정의 + "무엇을 조작할 수 있는지" 안내. 계산이 있으면 결과와 함께 "왜 그렇게 되는지"를 보인다.',
+    '- 결정적 계산 로직은 시험 표준 정의와 일치해야 한다(예: 스케줄링 간트·평균 대기/반환시간).',
+    '- 한국어로 작성한다. 시험 문제 전문을 그대로 넣지 말고 개념·원리를 다룬다.',
+    '- 지정된 출력 파일 외에는 어떤 파일도 만들거나 고치지 말라.',
+  ]
+    .filter(Boolean)
+    .join('\n');
+}
+
 // ── 브리지 팩토리 ─────────────────────────────────────────────────────────
 
 // createBridge({ config, repoRoot, cli }) → 잡 실행 API.
@@ -362,7 +389,50 @@ function createBridge(deps) {
     });
   }
 
-  return { chat, record, extract, enqueue };
+  // 마이크로월드 생성(claude 직접 쓰기): 지정 경로에 단일 HTML 작성. 잡 후 목적지 감사.
+  // jobKind='microworld' 는 audit 에서 record/extract 와 동일하게 목적지 경계로만 통제된다.
+  function microworld(params) {
+    return enqueue(async () => {
+      if (!cli.record) {
+        const err = new Error('claude(기록) CLI 가 감지되지 않았습니다.');
+        err.code = 'ECLIUNAVAILABLE';
+        throw err;
+      }
+      const { file, baseArgs } = recordCmd();
+      const prompt = buildMicroworldPrompt(params);
+      const snap = audit.snapshot({
+        monitorRoots: params.monitorRoots,
+        integrityTargets: params.integrityTargets || [],
+        repoRoot,
+      });
+      const res = await runProcess(
+        file,
+        [
+          ...baseArgs,
+          '-p',
+          prompt,
+          '--append-system-prompt',
+          GUARD_PROMPT,
+          '--add-dir',
+          repoRoot,
+          '--output-format',
+          'stream-json',
+          '--verbose',
+        ],
+        { cwd: repoRoot, timeoutMs: TIMEOUTS.microworld }
+      );
+      const parsed = parseClaudeStreamJson(res.stdout);
+      const report = audit.audit(snap, {
+        jobKind: 'microworld',
+        destinations: params.auditDestinations || [],
+        nickname: params.nickname,
+        repoRoot,
+      });
+      return { result: parsed.result, isError: parsed.isError, timedOut: res.timedOut, audit: report };
+    });
+  }
+
+  return { chat, record, extract, microworld, enqueue };
 }
 
 module.exports = {
@@ -374,6 +444,7 @@ module.exports = {
   buildChatPrompt,
   buildRecordPrompt,
   buildExtractPrompt,
+  buildMicroworldPrompt,
   GUARD_PROMPT,
   TIMEOUTS,
 };

@@ -1,0 +1,452 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>CPU 스케줄링 마이크로월드 — 정보처리기사</title>
+<style>
+  :root {
+    --bg: #f7f7fb; --panel: #ffffff; --ink: #1a1a22; --muted: #5b5b6b;
+    --line: #e2e2ec; --accent: #3b5bdb; --accent-soft: #e7ecff;
+    --idle: #c9c9d4; --good: #2f9e44; --warn: #e8590c;
+    --shadow: 0 1px 3px rgba(0,0,0,.08), 0 1px 2px rgba(0,0,0,.04);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14141b; --panel: #1e1e28; --ink: #e9e9f0; --muted: #a0a0b0;
+      --line: #33333f; --accent: #748ffc; --accent-soft: #23233a;
+      --idle: #44444f; --good: #51cf66; --warn: #ff922b;
+      --shadow: 0 1px 3px rgba(0,0,0,.4);
+    }
+  }
+  :root[data-theme="light"] {
+    --bg: #f7f7fb; --panel: #ffffff; --ink: #1a1a22; --muted: #5b5b6b;
+    --line: #e2e2ec; --accent: #3b5bdb; --accent-soft: #e7ecff; --idle: #c9c9d4;
+  }
+  :root[data-theme="dark"] {
+    --bg: #14141b; --panel: #1e1e28; --ink: #e9e9f0; --muted: #a0a0b0;
+    --line: #33333f; --accent: #748ffc; --accent-soft: #23233a; --idle: #44444f;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Malgun Gothic", "Segoe UI", sans-serif;
+    line-height: 1.6; padding: 24px 16px 64px;
+  }
+  .wrap { max-width: 940px; margin: 0 auto; }
+  h1 { font-size: 1.5rem; margin: 0 0 4px; }
+  h2 { font-size: 1.15rem; margin: 28px 0 10px; padding-bottom: 6px; border-bottom: 2px solid var(--line); }
+  .sub { color: var(--muted); margin: 0 0 18px; font-size: .95rem; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px; box-shadow: var(--shadow); margin-bottom: 16px; }
+  .callout { background: var(--accent-soft); border-left: 4px solid var(--accent); border-radius: 8px; padding: 12px 14px; margin: 12px 0; font-size: .95rem; }
+  .row { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; }
+  label { font-size: .85rem; color: var(--muted); display: block; margin-bottom: 4px; }
+  select, input[type="number"] { font: inherit; padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--ink); }
+  input[type="number"] { width: 68px; }
+  button { font: inherit; cursor: pointer; padding: 6px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--ink); }
+  button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+  button:hover { filter: brightness(1.05); }
+  table { border-collapse: collapse; width: 100%; font-size: .92rem; }
+  th, td { border: 1px solid var(--line); padding: 6px 8px; text-align: center; }
+  th { background: var(--accent-soft); }
+  .proc-table input { width: 60px; }
+  .gantt { overflow-x: auto; padding-bottom: 8px; }
+  .gantt-inner { position: relative; }
+  .bars { display: flex; height: 46px; border-radius: 8px; overflow: hidden; border: 1px solid var(--line); min-width: 320px; }
+  .bar { display: flex; align-items: center; justify-content: center; color: #fff; font-weight: 600; font-size: .85rem; border-right: 1px solid rgba(255,255,255,.35); white-space: nowrap; }
+  .bar.idle { color: var(--muted); background: var(--idle) !important; }
+  .axis { position: relative; height: 20px; margin-top: 2px; min-width: 320px; }
+  .tick { position: absolute; transform: translateX(-50%); font-size: .72rem; color: var(--muted); }
+  .playhead { position: absolute; top: -2px; width: 2px; background: var(--warn); height: 50px; pointer-events: none; transition: left .05s linear; }
+  .scrub-row { display: flex; align-items: center; gap: 12px; margin-top: 10px; }
+  .scrub-row input[type="range"] { flex: 1; }
+  .state-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; margin-top: 12px; }
+  .pcard { border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; font-size: .85rem; }
+  .pcard .pid { font-weight: 700; }
+  .pcard .st { font-size: .78rem; color: var(--muted); }
+  .pcard.run { border-color: var(--warn); box-shadow: 0 0 0 2px color-mix(in srgb, var(--warn) 30%, transparent); }
+  .pcard.ready { border-color: var(--accent); }
+  .membar { height: 8px; background: var(--line); border-radius: 4px; overflow: hidden; margin-top: 6px; }
+  .membar > i { display: block; height: 100%; }
+  .metrics-avg { font-weight: 700; }
+  .legend { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 8px; font-size: .82rem; }
+  .legend span { display: inline-flex; align-items: center; gap: 5px; }
+  .swatch { width: 14px; height: 14px; border-radius: 3px; display: inline-block; }
+  details { margin: 8px 0; }
+  summary { cursor: pointer; font-weight: 600; }
+  code { background: var(--accent-soft); padding: 1px 5px; border-radius: 5px; font-size: .88em; }
+  .theme-toggle { float: right; font-size: .8rem; }
+  footer { color: var(--muted); font-size: .82rem; margin-top: 32px; border-top: 1px solid var(--line); padding-top: 12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <button class="theme-toggle" onclick="toggleTheme()">🌗 테마</button>
+  <h1>CPU 스케줄링 마이크로월드</h1>
+  <p class="sub">프로그래밍언어활용 · 03 응용SW기초기술활용 · 운영체제 기초 활용 — 프로세스 스케줄링</p>
+
+  <div class="callout">
+    <strong>한 줄 직관:</strong> 여러 프로세스가 CPU 하나를 나눠 쓸 때, <em>어떤 순서로 실행하느냐</em>에 따라
+    각 프로세스가 기다리는 시간이 달라진다. 아래 프로세스의 <b>도착시간·실행시간</b>을 바꾸고 <b>알고리즘</b>을 골라
+    간트차트가 어떻게 바뀌는지, <b>시간 슬라이더</b>로 매 순간 무엇이 실행되고 무엇이 큐에서 기다리는지 직접 보라.
+  </div>
+
+  <!-- 입력부 -->
+  <div class="panel">
+    <div class="row" style="justify-content: space-between;">
+      <div>
+        <label>프로세스 (도착시간 / 실행시간)</label>
+        <table class="proc-table"><tbody id="procBody"></tbody></table>
+        <div style="margin-top:8px; display:flex; gap:8px;">
+          <button onclick="addProc()">+ 프로세스</button>
+          <button onclick="resetProcs()">기본값 복원</button>
+        </div>
+      </div>
+      <div class="row">
+        <div>
+          <label for="algo">알고리즘</label>
+          <select id="algo" onchange="onChange()">
+            <option value="fcfs">FCFS (선착순, 비선점)</option>
+            <option value="sjf">SJF (최단작업, 비선점)</option>
+            <option value="srtf">SRTF (최단잔여, 선점)</option>
+            <option value="rr">RR (라운드로빈, 선점)</option>
+          </select>
+        </div>
+        <div id="qWrap" style="display:none;">
+          <label for="quantum">타임 퀀텀</label>
+          <input type="number" id="quantum" min="1" value="3" onchange="onChange()" />
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 간트차트 -->
+  <h2>간트차트</h2>
+  <div class="panel">
+    <div class="gantt"><div class="gantt-inner" id="ganttInner">
+      <div class="bars" id="bars"></div>
+      <div class="axis" id="axis"></div>
+      <div class="playhead" id="playhead" style="left:0;"></div>
+    </div></div>
+    <div class="legend" id="legend"></div>
+    <div class="scrub-row">
+      <button onclick="togglePlay()" id="playBtn">▶ 재생</button>
+      <span id="clock" style="min-width:78px; font-variant-numeric: tabular-nums;">t = 0</span>
+      <input type="range" id="scrub" min="0" max="0" value="0" step="1" oninput="onScrub()" />
+    </div>
+    <div class="state-grid" id="stateGrid"></div>
+  </div>
+
+  <!-- 결과부 -->
+  <h2>결과 지표</h2>
+  <div class="panel">
+    <table>
+      <thead><tr><th>프로세스</th><th>도착</th><th>실행</th><th>완료</th><th>반환시간<br>(완료−도착)</th><th>대기시간<br>(반환−실행)</th><th>응답시간<br>(최초실행−도착)</th></tr></thead>
+      <tbody id="metricBody"></tbody>
+      <tfoot id="metricFoot"></tfoot>
+    </table>
+    <div class="callout" id="explain" style="margin-top:14px;"></div>
+  </div>
+
+  <details>
+    <summary>이해 확인 퀴즈 (직접 조작 후 풀어 보라)</summary>
+    <ol>
+      <li>SJF(비선점)와 SRTF(선점)의 <b>차이</b>는 무엇인가? 어느 쪽이 평균 대기시간이 이론상 더 짧은가?
+        <details><summary>답</summary>SJF는 한 번 CPU를 잡으면 끝날 때까지 놓지 않는다(비선점). SRTF는 더 짧은 잔여시간을 가진 프로세스가 도착하면 즉시 뺏는다(선점). 평균 대기시간은 SRTF가 이론상 최소다.</details>
+      </li>
+      <li>RR에서 <b>타임 퀀텀을 아주 크게</b> 하면 어떤 알고리즘과 같아지는가?
+        <details><summary>답</summary>가장 큰 실행시간보다 큰 퀀텀이면 선점이 일어나지 않아 <b>FCFS</b>와 같아진다. 퀀텀을 1로 줄이면 문맥교환이 잦아진다.</details>
+      </li>
+      <li>SJF/SRTF가 실무에서 그대로 쓰기 어려운 근본 이유는?
+        <details><summary>답</summary>각 프로세스의 실행시간(burst)을 <b>미리 정확히 알 수 없다</b>. 또 짧은 작업만 계속 오면 긴 작업이 무한정 밀리는 <b>기아(starvation)</b>가 생긴다.</details>
+      </li>
+      <li>기본값에서 알고리즘만 바꿔 보라. <b>반환시간과 대기시간의 차이</b>는 항상 무엇과 같은가?
+        <details><summary>답</summary>대기시간 = 반환시간 − 실행시간. 즉 둘의 차이는 그 프로세스의 <b>실행시간(burst)</b>으로, 알고리즘과 무관하게 고정된다.</details>
+      </li>
+    </ol>
+  </details>
+
+  <footer>
+    마이크로월드 · Papert의 "Mathland"와 Geoffrey Litt "Understanding is the new bottleneck"(2026)에서 착안.
+    이 파일은 <code>_공통/마이크로월드/</code> 공유 자산 — 스터디원 누구나 브라우저로 열어 쓸 수 있다.
+    스케줄링 계산은 자체 완결 JS(외부 의존성 0)이며 유닛 단위 시뮬레이션으로 검증됨.
+  </footer>
+</div>
+
+<script>
+'use strict';
+// ── 테마 토글 ───────────────────────────────────────────
+function toggleTheme() {
+  const r = document.documentElement;
+  const cur = r.getAttribute('data-theme');
+  const sysDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+  const now = cur ? cur : (sysDark ? 'dark' : 'light');
+  r.setAttribute('data-theme', now === 'dark' ? 'light' : 'dark');
+}
+
+// ── 색상 팔레트(프로세스별) ─────────────────────────────
+const PALETTE = ['#3b5bdb', '#2f9e44', '#e8590c', '#9c36b5', '#0c8599', '#c2255c', '#5f3dc4', '#66a80f'];
+function colorOf(pid, procs) {
+  const idx = procs.findIndex((p) => p.pid === pid);
+  return PALETTE[(idx < 0 ? 0 : idx) % PALETTE.length];
+}
+
+// ── 스케줄링 알고리즘 (node로 검증된 코드) ───────────────
+function mergeSegments(units) {
+  const segs = [];
+  for (let t = 0; t < units.length; t++) {
+    const pid = units[t];
+    const last = segs[segs.length - 1];
+    if (last && last.pid === pid) last.end = t + 1;
+    else segs.push({ pid, start: t, end: t + 1 });
+  }
+  return segs;
+}
+function metricsFromSegments(procs, segments) {
+  const perProc = {}, firstRun = {}, completion = {};
+  for (const s of segments) {
+    if (s.pid == null) continue;
+    if (firstRun[s.pid] === undefined) firstRun[s.pid] = s.start;
+    completion[s.pid] = s.end;
+  }
+  for (const p of procs) {
+    const comp = completion[p.pid];
+    if (comp === undefined) continue;
+    const turnaround = comp - p.arrival;
+    perProc[p.pid] = { completion: comp, turnaround, waiting: turnaround - p.burst, response: firstRun[p.pid] - p.arrival };
+  }
+  return perProc;
+}
+function byArrivalPid(a, b) { return a.arrival - b.arrival || String(a.pid).localeCompare(String(b.pid)); }
+function simulate(procs, pick, opts) {
+  opts = opts || {};
+  const rem = {}; for (const p of procs) rem[p.pid] = p.burst;
+  const done = {}; const units = [];
+  let t = 0, current = null, guard = 0;
+  const total = procs.reduce((s, p) => s + p.burst, 0);
+  const maxT = total + procs.reduce((m, p) => Math.max(m, p.arrival), 0) + 5;
+  while (Object.keys(done).length < procs.length && guard++ < maxT * 4 + 100) {
+    const avail = procs.filter((p) => p.arrival <= t && !done[p.pid] && rem[p.pid] > 0);
+    if (avail.length === 0) { units[t] = null; t++; current = null; continue; }
+    let chosen;
+    if (opts.nonPreempt && current && rem[current] > 0 && !done[current]) chosen = current;
+    else { chosen = pick(avail, rem, t); current = chosen; }
+    units[t] = chosen; rem[chosen]--;
+    if (rem[chosen] === 0) { done[chosen] = true; current = null; }
+    t++;
+  }
+  const segments = mergeSegments(units);
+  return { segments, perProc: metricsFromSegments(procs, segments), totalTime: units.length };
+}
+function fcfs(procs) { return simulate(procs, (a) => { a.sort(byArrivalPid); return a[0].pid; }, { nonPreempt: true }); }
+function sjf(procs) { return simulate(procs, (a, rem) => { a.sort((x, y) => rem[x.pid] - rem[y.pid] || byArrivalPid(x, y)); return a[0].pid; }, { nonPreempt: true }); }
+function srtf(procs) { return simulate(procs, (a, rem) => { a.sort((x, y) => rem[x.pid] - rem[y.pid] || byArrivalPid(x, y)); return a[0].pid; }, { nonPreempt: false }); }
+function rr(procs, quantum) {
+  const q = Math.max(1, quantum | 0);
+  const sorted = procs.slice().sort(byArrivalPid);
+  const rem = {}; for (const p of procs) rem[p.pid] = p.burst;
+  const done = {}; const units = [];
+  let t = 0, i = 0; const ready = [];
+  const enq = (upTo) => { while (i < sorted.length && sorted[i].arrival <= upTo) { ready.push(sorted[i].pid); i++; } };
+  enq(t);
+  let guard = 0; const total = procs.reduce((s, p) => s + p.burst, 0);
+  while (Object.keys(done).length < procs.length && guard++ < total * 4 + 1000) {
+    if (ready.length === 0) {
+      if (i < sorted.length) { const next = sorted[i].arrival; for (; t < next; t++) units[t] = null; enq(t); }
+      else break;
+      continue;
+    }
+    const pid = ready.shift();
+    const slice = Math.min(q, rem[pid]);
+    for (let k = 0; k < slice; k++) { units[t] = pid; t++; }
+    rem[pid] -= slice;
+    enq(t);
+    if (rem[pid] > 0) ready.push(pid); else done[pid] = true;
+  }
+  const segments = mergeSegments(units);
+  return { segments, perProc: metricsFromSegments(procs, segments), totalTime: units.length };
+}
+
+// ── 상태 ────────────────────────────────────────────────
+const DEFAULT = [
+  { pid: 'P1', arrival: 0, burst: 7 },
+  { pid: 'P2', arrival: 2, burst: 4 },
+  { pid: 'P3', arrival: 4, burst: 1 },
+  { pid: 'P4', arrival: 5, burst: 4 },
+];
+let procs = DEFAULT.map((p) => ({ ...p }));
+let result = null;
+let unitsAt = [];   // unitsAt[t] = pid|null
+let playTimer = null;
+
+// ── 프로세스 표 렌더/편집 ───────────────────────────────
+function renderProcTable() {
+  const body = document.getElementById('procBody');
+  body.innerHTML = '';
+  procs.forEach((p, idx) => {
+    const tr = document.createElement('tr');
+    const sw = `<span class="swatch" style="background:${PALETTE[idx % PALETTE.length]}"></span>`;
+    tr.innerHTML =
+      `<td>${sw} <b>${p.pid}</b></td>` +
+      `<td>도착 <input type="number" min="0" value="${p.arrival}" data-i="${idx}" data-k="arrival"></td>` +
+      `<td>실행 <input type="number" min="1" value="${p.burst}" data-i="${idx}" data-k="burst"></td>` +
+      `<td><button data-del="${idx}">✕</button></td>`;
+    body.appendChild(tr);
+  });
+  body.querySelectorAll('input').forEach((inp) => inp.addEventListener('input', (e) => {
+    const i = +e.target.dataset.i, k = e.target.dataset.k;
+    let v = parseInt(e.target.value, 10);
+    if (isNaN(v)) return;
+    if (k === 'burst') v = Math.max(1, v);
+    if (k === 'arrival') v = Math.max(0, v);
+    procs[i][k] = v;
+    onChange();
+  }));
+  body.querySelectorAll('button[data-del]').forEach((b) => b.addEventListener('click', (e) => {
+    if (procs.length <= 1) return;
+    procs.splice(+e.target.dataset.del, 1);
+    renderProcTable(); onChange();
+  }));
+}
+function addProc() {
+  const n = procs.length + 1;
+  procs.push({ pid: 'P' + n, arrival: 0, burst: 3 });
+  renderProcTable(); onChange();
+}
+function resetProcs() { procs = DEFAULT.map((p) => ({ ...p })); renderProcTable(); onChange(); }
+
+// ── 계산 + 렌더 ─────────────────────────────────────────
+function compute() {
+  const algo = document.getElementById('algo').value;
+  document.getElementById('qWrap').style.display = algo === 'rr' ? '' : 'none';
+  const q = parseInt(document.getElementById('quantum').value, 10) || 3;
+  if (algo === 'fcfs') result = fcfs(procs);
+  else if (algo === 'sjf') result = sjf(procs);
+  else if (algo === 'srtf') result = srtf(procs);
+  else result = rr(procs, q);
+  unitsAt = [];
+  for (const s of result.segments) for (let t = s.start; t < s.end; t++) unitsAt[t] = s.pid;
+}
+function onChange() { stopPlay(); compute(); renderGantt(); renderMetrics(); setupScrub(); onScrub(); }
+
+const PXPU = 34; // 유닛당 픽셀
+function renderGantt() {
+  const bars = document.getElementById('bars');
+  const axis = document.getElementById('axis');
+  bars.innerHTML = ''; axis.innerHTML = '';
+  const total = result.totalTime || 1;
+  for (const s of result.segments) {
+    const w = (s.end - s.start) * PXPU;
+    const div = document.createElement('div');
+    div.className = 'bar' + (s.pid == null ? ' idle' : '');
+    div.style.width = w + 'px';
+    if (s.pid != null) div.style.background = colorOf(s.pid, procs);
+    div.textContent = s.pid == null ? '유휴' : s.pid;
+    div.title = `${s.pid == null ? '유휴' : s.pid}: ${s.start}~${s.end}`;
+    div.onclick = () => { document.getElementById('scrub').value = s.start; onScrub(); };
+    bars.appendChild(div);
+  }
+  const width = total * PXPU;
+  document.getElementById('ganttInner').style.width = width + 'px';
+  axis.style.width = width + 'px';
+  for (let t = 0; t <= total; t++) {
+    const tick = document.createElement('span');
+    tick.className = 'tick'; tick.style.left = (t * PXPU) + 'px'; tick.textContent = t;
+    axis.appendChild(tick);
+  }
+  // 범례
+  const legend = document.getElementById('legend');
+  legend.innerHTML = '';
+  procs.forEach((p, idx) => {
+    const s = document.createElement('span');
+    s.innerHTML = `<span class="swatch" style="background:${PALETTE[idx % PALETTE.length]}"></span>${p.pid} (도착 ${p.arrival}, 실행 ${p.burst})`;
+    legend.appendChild(s);
+  });
+}
+
+function renderMetrics() {
+  const body = document.getElementById('metricBody');
+  const foot = document.getElementById('metricFoot');
+  body.innerHTML = '';
+  const ordered = procs.slice().sort(byArrivalPid);
+  let sT = 0, sW = 0, sR = 0, n = 0;
+  for (const p of ordered) {
+    const m = result.perProc[p.pid];
+    if (!m) continue;
+    sT += m.turnaround; sW += m.waiting; sR += m.response; n++;
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td><b>${p.pid}</b></td><td>${p.arrival}</td><td>${p.burst}</td><td>${m.completion}</td><td>${m.turnaround}</td><td>${m.waiting}</td><td>${m.response}</td>`;
+    body.appendChild(tr);
+  }
+  n = n || 1;
+  foot.innerHTML = `<tr class="metrics-avg"><td colspan="4">평균</td><td>${(sT/n).toFixed(2)}</td><td>${(sW/n).toFixed(2)}</td><td>${(sR/n).toFixed(2)}</td></tr>`;
+
+  const algo = document.getElementById('algo').value;
+  const names = { fcfs: 'FCFS(선착순)', sjf: 'SJF(최단작업 우선, 비선점)', srtf: 'SRTF(최단잔여 우선, 선점)', rr: 'RR(라운드로빈)' };
+  const idle = result.segments.some((s) => s.pid == null);
+  document.getElementById('explain').innerHTML =
+    `<b>${names[algo]}</b> 결과: 평균 대기시간 <b>${(sW/n).toFixed(2)}</b>, 평균 반환시간 <b>${(sT/n).toFixed(2)}</b>. ` +
+    `대기시간 = 반환시간 − 실행시간이므로, 각 프로세스의 대기시간 차이는 <em>얼마나 뒤로 밀렸는가</em>로 결정된다. ` +
+    (algo === 'srtf' ? '선점형이라 짧은 잔여시간 프로세스가 오면 즉시 CPU를 뺏어 평균 대기시간이 대체로 가장 짧다. ' : '') +
+    (algo === 'fcfs' ? '먼저 온 순서대로만 처리해 긴 작업이 앞서면 뒤 작업들이 크게 밀린다(콘보이 효과). ' : '') +
+    (algo === 'rr' ? '퀀텀만큼씩 번갈아 실행한다. 퀀텀을 키우면 FCFS에, 줄이면 문맥교환 비용이 커진다. ' : '') +
+    (idle ? '중간에 <b>유휴(idle)</b> 구간이 있다 — 그 시점에 준비된 프로세스가 없어 CPU가 논다.' : '');
+}
+
+// ── 시간 슬라이더(스크럽) ───────────────────────────────
+function setupScrub() {
+  const scrub = document.getElementById('scrub');
+  scrub.max = result.totalTime;
+  scrub.value = 0;
+}
+function onScrub() {
+  const t = parseInt(document.getElementById('scrub').value, 10) || 0;
+  document.getElementById('clock').textContent = 't = ' + t;
+  document.getElementById('playhead').style.left = (t * PXPU) + 'px';
+  const runningPid = t < unitsAt.length ? unitsAt[t] : null; // 구간 [t, t+1)
+  // 각 프로세스 상태
+  const grid = document.getElementById('stateGrid');
+  grid.innerHTML = '';
+  for (const p of procs.slice().sort(byArrivalPid)) {
+    // t 시점까지 실행된 유닛 수
+    let ran = 0;
+    for (let u = 0; u < t && u < unitsAt.length; u++) if (unitsAt[u] === p.pid) ran++;
+    const remaining = p.burst - ran;
+    let state, cls;
+    if (p.arrival > t) { state = '도착 전'; cls = ''; }
+    else if (remaining <= 0) { state = '완료'; cls = ''; }
+    else if (runningPid === p.pid) { state = '▶ 실행 중'; cls = 'run'; }
+    else { state = '준비 큐 대기'; cls = 'ready'; }
+    const frac = Math.max(0, Math.min(1, ran / p.burst));
+    const card = document.createElement('div');
+    card.className = 'pcard ' + cls;
+    card.innerHTML =
+      `<div class="pid"><span class="swatch" style="background:${colorOf(p.pid, procs)}"></span> ${p.pid}</div>` +
+      `<div class="st">${state}</div>` +
+      `<div class="st">남은 실행 ${Math.max(0, remaining)} / ${p.burst}</div>` +
+      `<div class="membar"><i style="width:${frac*100}%; background:${colorOf(p.pid, procs)}"></i></div>`;
+    grid.appendChild(card);
+  }
+}
+function togglePlay() { playTimer ? stopPlay() : startPlay(); }
+function startPlay() {
+  const scrub = document.getElementById('scrub');
+  if (+scrub.value >= +scrub.max) scrub.value = 0;
+  document.getElementById('playBtn').textContent = '⏸ 정지';
+  playTimer = setInterval(() => {
+    const v = +scrub.value;
+    if (v >= +scrub.max) { stopPlay(); return; }
+    scrub.value = v + 1; onScrub();
+  }, 550);
+}
+function stopPlay() {
+  if (playTimer) { clearInterval(playTimer); playTimer = null; }
+  document.getElementById('playBtn').textContent = '▶ 재생';
+}
+
+// ── 초기화 ──────────────────────────────────────────────
+renderProcTable();
+onChange();
+</script>
+</body>
+</html>

@@ -3,6 +3,7 @@
 // 뷰 인터페이스: export async function mount(container, params) / export function unmount().
 
 import { renderUploadPanel } from '../components/upload.js';
+import { renderMicroworldPanel } from '../components/microworld.js';
 import { solveHash } from '../router.js';
 import { toast } from '../components/toast.js';
 
@@ -23,7 +24,7 @@ async function getJson(url) {
 }
 
 // 현재 뷰 상태(fs-change 갱신·정리용).
-const view = { grade: null, cert: null, listWrap: null, uploadDetails: null, onFsChange: null };
+const view = { grade: null, cert: null, listWrap: null, uploadDetails: null, onFsChange: null, mwCleanup: null };
 
 // 내 시도 기록을 시험ID별로 집계: { [시험]: { count, 총점, 합격여부 } } (최신 시도 기준).
 async function loadAttemptMap(grade, cert) {
@@ -91,9 +92,29 @@ export async function mount(container, params) {
   uploadDetails.append(uploadBody);
   page.append(uploadDetails);
 
+  // 접이식 마이크로월드 패널(개념 시뮬레이션 생성·체험).
+  const mwDetails = el('details', 'cert-microworld');
+  const mwSummary = document.createElement('summary');
+  mwSummary.className = 'cert-upload-summary';
+  mwSummary.textContent = '🌐 마이크로월드 (개념 시뮬레이션)';
+  mwDetails.append(mwSummary);
+  const mwBody = el('div', 'cert-mw-body');
+  mwDetails.append(mwBody);
+  page.append(mwDetails);
+
   container.append(page);
 
   renderUploadPanel(uploadBody, { grade, cert }, () => refreshList());
+  // 패널 열릴 때 최초 1회 마운트(닫힌 상태에선 목록 요청을 아끼기 위해 지연 마운트).
+  mwDetails.addEventListener(
+    'toggle',
+    () => {
+      if (mwDetails.open && !view.mwCleanup) {
+        view.mwCleanup = renderMicroworldPanel(mwBody, { grade, cert });
+      }
+    },
+    { once: false }
+  );
   uploadToggle.addEventListener('click', () => {
     uploadDetails.open = !uploadDetails.open;
     if (uploadDetails.open) uploadDetails.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
@@ -214,6 +235,14 @@ function examRow(exam, rec) {
 export function unmount() {
   if (view.onFsChange) window.removeEventListener('qnet:fs-change', view.onFsChange);
   view.onFsChange = null;
+  if (view.mwCleanup) {
+    try {
+      view.mwCleanup();
+    } catch (_e) {
+      /* 정리 실패는 무시 */
+    }
+  }
+  view.mwCleanup = null;
   view.listWrap = null;
   view.uploadDetails = null;
 }

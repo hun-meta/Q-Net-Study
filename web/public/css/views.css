@@ -1773,3 +1773,113 @@
     margin-left: 0;
   }
 }
+
+/* ==========================================================================
+   마이크로월드 패널 (components/microworld.js) — 개념 시뮬레이션 생성·체험
+   ========================================================================== */
+.cert-microworld {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-m);
+  background: var(--surface);
+  overflow: hidden;
+  margin-top: 12px;
+}
+.cert-microworld[open] .cert-upload-summary::before {
+  transform: rotate(90deg);
+}
+.cert-microworld[open] .cert-upload-summary {
+  border-bottom: 1px solid var(--border);
+}
+.cert-mw-body {
+  padding: 16px;
+}
+
+.mw-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.mw-intro {
+  margin: 0;
+  font-size: 13px;
+  color: var(--fg-muted);
+}
+.mw-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+.mw-subject,
+.mw-concept {
+  font: inherit;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-s);
+  background: var(--surface);
+  color: var(--fg);
+}
+.mw-concept {
+  flex: 1;
+  min-width: 180px;
+}
+.mw-hint {
+  margin: 0;
+  font-size: 12px;
+}
+.mw-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.mw-group-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fg-muted);
+}
+.mw-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.mw-chip {
+  font: inherit;
+  font-size: 13px;
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--fg);
+  cursor: pointer;
+}
+.mw-chip:hover {
+  border-color: var(--accent);
+}
+.mw-viewer:empty {
+  display: none;
+}
+.mw-viewer-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.mw-viewer-title {
+  font-size: 12px;
+  color: var(--fg-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mw-frame {
+  width: 100%;
+  height: 480px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-m);
+  background: #fff;
+  transition: height .2s ease;
+}
+.mw-frame.big {
+  height: 82vh;
+}
