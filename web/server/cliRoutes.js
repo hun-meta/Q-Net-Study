@@ -111,13 +111,18 @@ function router(deps) {
   }
 
   // CLI 가용성 게이트. 미설치/미로그인 → 503 + 폴백 안내(핵심 루프는 계속 동작).
+  // 챗 가용성은 저장된 플래그가 아니라 사용 시점 파생값이다: Z.AI 키가 등록돼 있으면
+  // agy 미감지 상태에서도 챗이 가능하다(설계 A-4).
   function requireCli(role, res) {
-    if (role === 'chat' && !cli.chat) {
-      res.status(503).json({
-        error: 'agy(챗) CLI 가 감지되지 않았습니다. 챗 기능은 비활성 상태이며 풀이·채점·기록은 정상 동작합니다.',
-        cli: 'chat',
-      });
-      return false;
+    if (role === 'chat') {
+      const chatAvailable = configMod.resolveZai().enabled || cli.chat;
+      if (!chatAvailable) {
+        res.status(503).json({
+          error: 'agy(챗) CLI 미설치·Z.AI API Key 미등록 — 챗 기능은 비활성 상태이며 풀이·채점·기록은 정상 동작합니다.',
+          cli: 'chat',
+        });
+        return false;
+      }
     }
     if (role === 'record' && !cli.record) {
       res.status(503).json({

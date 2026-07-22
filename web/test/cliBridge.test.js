@@ -95,6 +95,32 @@ test('buildRecordPrompt: 목적지·규칙·태그 지시 포함', () => {
   assert.ok(p.includes('2023-1-필기'));
 });
 
+test('buildRecordPrompt: 정리 스타일 섹션이 "승인된 대화 내용" 뒤·"기록 목적지와 규칙" 앞에 삽입', () => {
+  const p = bridgeMod.buildRecordPrompt({
+    examId: '2023-1-필기',
+    qno: '5',
+    conversation: '대화 내용',
+    destinations: { note: '/repo/hun/notes' },
+    nickname: 'hun',
+    today: '2026-07-21',
+  });
+  assert.ok(p.includes('# 정리 스타일'));
+  assert.ok(p.includes(bridgeMod.RECORD_STYLE));
+  const idxConv = p.indexOf('# 승인된 대화 내용');
+  const idxStyle = p.indexOf('# 정리 스타일');
+  const idxDest = p.indexOf('# 기록 목적지와 규칙');
+  assert.ok(idxConv > -1 && idxStyle > -1 && idxDest > -1);
+  assert.ok(idxConv < idxStyle, '정리 스타일은 승인된 대화 내용 뒤에 와야 함');
+  assert.ok(idxStyle < idxDest, '정리 스타일은 기록 목적지와 규칙 앞에 와야 함');
+});
+
+test('CHAT_ROLE·RECORD_STYLE export 확인', () => {
+  assert.strictEqual(typeof bridgeMod.CHAT_ROLE, 'string');
+  assert.ok(bridgeMod.CHAT_ROLE.startsWith('# 역할'));
+  assert.strictEqual(typeof bridgeMod.RECORD_STYLE, 'string');
+  assert.ok(bridgeMod.RECORD_STYLE.startsWith('# 정리 스타일'));
+});
+
 test('createBridge.chat: CLI 미감지 시 ECLIUNAVAILABLE', async () => {
   const bridge = bridgeMod.createBridge({
     config: { cliChat: 'agy', cliRecord: 'claude' },
@@ -126,4 +152,80 @@ test('createBridge.chat: fake-agy 스트리밍 + 무변화 감사 clean', async 
   assert.strictEqual(job.audit.clean, true);
   // fake-agy 는 파일을 쓰지 않으므로 seed 그대로.
   assert.strictEqual(fs.readFileSync(path.join(root, 'seed.md'), 'utf8'), '원본');
+});
+
+// getReader() 기반 fetch Response 목(zaiChat.test.js와 동일 형태).
+function makeSseResponse(chunks) {
+  let i = 0;
+  return {
+    ok: true,
+    status: 200,
+    text: async () => '',
+    body: {
+      getReader() {
+        return {
+          async read() {
+            if (i >= chunks.length) return { done: true, value: undefined };
+            const value = Buffer.from(chunks[i], 'utf8');
+            i += 1;
+            return { done: false, value };
+          },
+        };
+      },
+    },
+  };
+}
+
+test('createBridge.chat: Z.AI 활성(resolveZai 목 주입) 시 CLI 미감지여도 spawn 없이 zaiChat 경로로 응답', async () => {
+  const bridge = bridgeMod.createBridge({
+    config: { cliChat: 'agy', cliRecord: 'claude' },
+    repoRoot: os.tmpdir(),
+    // agy CLI 미감지 상태(cli.chat:false) — zai 경로는 이와 무관하게 동작해야 한다.
+    cli: { chat: false, record: false },
+    resolveZai: () => ({
+      enabled: true,
+      apiKey: 'zai-secret',
+      source: 'env',
+      baseUrl: 'https://z.example/v4',
+      model: 'glm-5.2',
+      effort: 'none',
+    }),
+  });
+  const onData = [];
+  const job = await bridge.chat({
+    message: '핵심이 뭐야',
+    onData: (c) => onData.push(c),
+    fetchImpl: async () =>
+      makeSseResponse([
+        'data: {"choices":[{"delta":{"content":"안녕"}}]}\n\n',
+        'data: [DONE]\n\n',
+      ]),
+  });
+  assert.deepStrictEqual(onData, ['안녕']);
+  assert.strictEqual(job.text, '안녕');
+  assert.strictEqual(job.audit.clean, true);
+  assert.strictEqual(job.audit.skipped, 'zai-http');
+});
+
+test('createBridge.chat: Z.AI 비활성(resolveZai 목 주입) 시 기존 agy 흐름 그대로(회귀)', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'qnet-chat-regress-'));
+  const bridge = bridgeMod.createBridge({
+    config: { cliChat: `node ${FAKE_AGY}`, cliRecord: 'claude' },
+    repoRoot: root,
+    cli: { chat: true, record: false },
+    resolveZai: () => ({ enabled: false, apiKey: '', source: null, baseUrl: '', model: '', effort: '' }),
+  });
+  const chunks = [];
+  const job = await bridge.chat({
+    message: '핵심이 뭐야',
+    monitorRoots: [root],
+    integrityTargets: [],
+    onData: (c) => chunks.push(c),
+    nickname: 'hun',
+  });
+  assert.ok(chunks.length > 0);
+  assert.ok(job.text.includes('답변'));
+  assert.strictEqual(job.audit.clean, true);
+  assert.strictEqual(job.audit.skipped, undefined); // agy 경로는 zai 스텁 감사가 아니라 실 audit.audit() 결과.
+  fs.rmSync(root, { recursive: true, force: true });
 });

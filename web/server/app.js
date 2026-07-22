@@ -206,15 +206,70 @@ function createApp(deps) {
 
   // 클라이언트 부트스트랩: 닉네임·토큰·CLI 상태·포트.
   app.get('/api/state', (req, res) => {
+    const zai = config.resolveZai();
+    const chatAvailable = zai.enabled || cli.chat;
     res.json({
       nickname: nickname.getNickname(),
       token,
       cli: {
-        chat: { command: cfg.cliChat, available: cli.chat },
+        chat: {
+          command: cfg.cliChat,
+          available: chatAvailable,
+          provider: zai.enabled ? 'zai' : 'agy',
+          ...(zai.enabled ? { model: zai.model, effort: zai.effort, keySource: zai.source } : {}),
+        },
         record: { command: cfg.cliRecord, available: cli.record },
       },
       port: req.socket.localPort,
     });
+  });
+
+  // Z.AI API Key 웹 등록(설계 A-7). 저장소: .qnet-web/secrets.json(감사 제외·0600·원자 쓰기).
+  // 비-GET 이므로 전역 토큰 가드(security.applySecurity)가 자동 적용된다.
+  // 키 값은 어떤 응답에도 담지 않는다.
+  app.post('/api/zai/key', (req, res) => {
+    try {
+      const current = config.resolveZai();
+      if (current.source === 'env') {
+        return res
+          .status(400)
+          .json({ error: '환경변수 키가 우선 적용 중입니다 — 환경변수를 비우고 등록하세요.' });
+      }
+      const raw = req.body && req.body.apiKey;
+      const key = typeof raw === 'string' ? raw.trim() : '';
+      if (!key) return res.status(400).json({ error: 'API Key 를 입력하세요.' });
+      if (/[\x00-\x1f\x7f]/.test(key)) {
+        return res.status(400).json({ error: 'API Key 에 제어문자·개행을 쓸 수 없습니다.' });
+      }
+      config.saveZaiKey(key);
+      hub.broadcast('cli-change', { chat: true, record: cli.record, provider: 'zai' });
+      return res.json({ ok: true, provider: 'zai', keySource: 'file' });
+    } catch (err) {
+      return res.status(400).json({ error: err.message });
+    }
+  });
+
+  // Z.AI API Key 삭제: env 키 사용 중이면 UI 로 관리 불가(400). 삭제 후 agy 폴백 가용성 반영.
+  app.delete('/api/zai/key', (req, res) => {
+    try {
+      const current = config.resolveZai();
+      if (current.source === 'env') {
+        return res
+          .status(400)
+          .json({ error: '환경변수 키 사용 중에는 삭제할 수 없습니다 — 환경변수를 직접 관리하세요.' });
+      }
+      config.deleteZaiKey();
+      const after = config.resolveZai();
+      const chatAvailable = after.enabled || cli.chat;
+      hub.broadcast('cli-change', {
+        chat: chatAvailable,
+        record: cli.record,
+        provider: after.enabled ? 'zai' : 'agy',
+      });
+      return res.json({ ok: true });
+    } catch (err) {
+      return res.status(400).json({ error: err.message });
+    }
   });
 
   // 저장소 스캔: 종류(분야)/자격증/참여자 목록 + 전체 참여자 합집합.

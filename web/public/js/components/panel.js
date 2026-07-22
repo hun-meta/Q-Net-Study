@@ -253,7 +253,7 @@ async function buildContextText(ctx, qno) {
 function renderChatTab() {
   const { ctx, qno, bodyEl } = active;
   const { cli } = getState();
-  const agyOk = !!(cli && cli.chat && cli.chat.available);
+  const chatOk = !!(cli && cli.chat && cli.chat.available);
 
   bodyEl.className = 'panel-body panel-chat';
   bodyEl.innerHTML = '';
@@ -286,12 +286,12 @@ function renderChatTab() {
     if (counts.sols) chips.append(chatChip(`공유 해설 ${counts.sols}`));
   });
 
-  if (!agyOk) {
+  if (!chatOk) {
     const notice = el('div', 'panel-chat-noagy');
     const head = el('div', 'panel-chat-noagy-head');
-    head.append(el('span', 'ul-notice-dot'), document.createTextNode('agy 미설치 · 미로그인'));
+    head.append(el('span', 'ul-notice-dot'), document.createTextNode('챗 비활성'));
     notice.append(head);
-    notice.append(document.createTextNode('이 기능은 agy 설치·로그인 후 사용할 수 있어요.'));
+    notice.append(document.createTextNode('챗은 agy 설치 또는 우측 상단 API Key 등록 후 사용할 수 있어요.'));
     footer.append(notice);
     return;
   }
