@@ -22,6 +22,8 @@ const nickname = require('./nickname');
 const answerKey = require('./answerKey');
 const examIndex = require('./examIndex');
 const configMod = require('./config');
+const questionStore = require('./questionStore');
+const questionRunner = require('./questionRunner');
 const { createBridge, serialize } = require('./cliBridge');
 
 // 경로 세그먼트 안전성 검사(라우트 파라미터·파일명 탈출 차단).
@@ -257,11 +259,30 @@ function router(deps) {
       broadcast('fs-change', { kind: 'exam-index', 시험ID });
 
       process.stderr.write(`[exam-upload] ${시험ID}: 정답 ${parsed.문항수}문항 추출·INDEX 부기 완료\n`);
+
+      // 문항 단위 추출(백그라운드 자동 통합): 정답 확정 직후 과목별 questions 잡을 큐에
+      // 올린다(두 번 추출 방지). 업로드 응답은 기다리지 않으며 완료는 SSE 'questions-done'.
+      let questionsJobId = null;
+      try {
+        const qr = questionRunner.start(
+          { repoRoot, bridge, broadcast },
+          { grade, cert, examId: 시험ID }
+        );
+        questionsJobId = qr.jobId || null;
+        if (qr.skipped) {
+          process.stderr.write(`[exam-upload] ${시험ID}: 문항 이미 완비 — 추출 생략\n`);
+        }
+      } catch (qe) {
+        // 문항 추출 시작 실패는 업로드 성공을 막지 않는다(수동 재실행 가능).
+        process.stderr.write(`[exam-upload] ${시험ID}: 문항 추출 시작 실패 — ${qe.message}\n`);
+      }
+
       return res.json({
         ok: true,
         시험ID,
         문항수: parsed.문항수,
         숨김페이지수: parsed.숨김페이지수,
+        questionsJobId,
         audit: job.audit,
       });
     } catch (err) {
@@ -270,16 +291,19 @@ function router(deps) {
   });
 
   // ── 챗(agy 스트리밍, 표시만) ──────────────────────────────────────────
-  // body: { grade, cert, message, history:[{role,text}], contextText }
+  // body: { grade, cert, mode:'solve'|'view', message, history:[{role,text}], contextText }
   // 응답: NDJSON 스트림 — {"type":"chunk","text":..} 다수 + {"type":"done",audit} | {"type":"error"}.
+  // 문항 컨텍스트는 서버가 조립한다: 문항 md가 있으면 원문을 주입하고(PDF 전체 참조 대체),
+  // mode==='solve'(기본, 안전값)면 정답 줄을 서버가 제거한다 — 클라이언트 신뢰 금지.
   r.post('/api/chat/:examId/:qno', async (req, res) => {
     if (!requireCli('chat', res)) return;
     let examId;
     let qno;
+    let scope;
     try {
       examId = 안전세그먼트(req.params.examId, '시험ID');
       qno = 안전세그먼트(req.params.qno, '문번');
-      자격증컨텍스트(req.body || {}); // grade/cert 검증(스코프 확인용)
+      scope = 자격증컨텍스트(req.body || {}); // grade/cert 검증 + 문항 컨텍스트 조립에 사용
     } catch (err) {
       return res.status(err.status || 400).json({ error: err.message });
     }
@@ -299,10 +323,24 @@ function router(deps) {
 
     try {
       const body = req.body || {};
+      const mode = body.mode === 'view' ? 'view' : 'solve';
+      let contextText = typeof body.contextText === 'string' ? body.contextText : '';
+      try {
+        const q = questionStore.read(repoRoot, scope.grade, scope.cert, examId, Number(qno));
+        if (q) {
+          contextText = questionStore.buildChatContext({
+            원문md: q.원문md,
+            mode,
+            clientContext: contextText,
+          });
+        }
+      } catch (_e) {
+        /* 문항 부재·파싱 실패 → 기존 컨텍스트(PDF 경로 참조) 폴백 */
+      }
       const job = await bridge.chat({
         examId,
         qno,
-        contextText: body.contextText,
+        contextText,
         history: body.history,
         message: body.message,
         nickname: nickname.getNickname(),

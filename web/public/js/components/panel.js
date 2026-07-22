@@ -178,13 +178,27 @@ function solutionCard(sol) {
 
 // ── 챗 탭 ────────────────────────────────────────────────────────────────────
 async function buildContextText(ctx, qno) {
-  const pdfRel = `${ctx.grade}/${ctx.cert}/_공통/기출문제/${ctx.examId}.pdf`;
   const lines = [
     '[문항 컨텍스트]',
     `시험: ${ctx.examId} / 문번: ${qno}`,
     `자격증: ${ctx.grade} / ${ctx.cert}`,
-    `기출 PDF: ${pdfRel} (문번 ${qno} 문항 페이지를 직접 확인)`,
   ];
+  // 문항 md가 추출되어 있으면 서버가 챗 요청 시 [문항 원문]을 직접 주입한다
+  // (mode별 정답 스트립도 서버 소유). 그 경우 PDF 전체 참조는 불필요 —
+  // 미추출 기출만 PDF 경로 폴백을 남긴다.
+  let 문항있음 = false;
+  try {
+    const qres = await fetch(
+      `/api/question/${enc(ctx.examId)}/${enc(qno)}?grade=${enc(ctx.grade)}&cert=${enc(ctx.cert)}`
+    );
+    문항있음 = qres.ok;
+  } catch (_e) {
+    /* 부가정보 */
+  }
+  if (!문항있음) {
+    const pdfRel = `${ctx.grade}/${ctx.cert}/_공통/기출문제/${ctx.examId}.pdf`;
+    lines.push(`기출 PDF: ${pdfRel} (문번 ${qno} 문항 페이지를 직접 확인)`);
+  }
   let counts = { notes: 0, sols: 0 };
   try {
     const res = await fetch(`/api/concept/${enc(ctx.examId)}/${enc(qno)}`);
@@ -204,7 +218,7 @@ async function buildContextText(ctx, qno) {
   } catch (_e) {
     /* 부가정보 */
   }
-  return { text: lines.join('\n'), counts };
+  return { text: lines.join('\n'), counts, 문항있음 };
 }
 
 function renderChatTab() {
@@ -234,10 +248,11 @@ function renderChatTab() {
   const footer = el('div', 'panel-chat-foot');
   bodyEl.append(footer);
 
-  // 컨텍스트 칩 보강(노트/해설 수).
-  buildContextText(ctx, qno).then(({ text, counts }) => {
+  // 컨텍스트 칩 보강(문항 데이터·노트/해설 수).
+  buildContextText(ctx, qno).then(({ text, counts, 문항있음 }) => {
     active._contextText = text;
     if (!active || active.tab !== 'chat') return;
+    if (문항있음) chips.append(chatChip('문항 ✓'));
     if (counts.notes) chips.append(chatChip(`연결 노트 ${counts.notes}`));
     if (counts.sols) chips.append(chatChip(`공유 해설 ${counts.sols}`));
   });
@@ -291,7 +306,7 @@ function renderChatTab() {
     try {
       const res = await apiFetch(`/api/chat/${enc(ctx.examId)}/${enc(qno)}`, {
         method: 'POST',
-        body: { grade: ctx.grade, cert: ctx.cert, contextText: active._contextText || '', history: active.history.slice(0, -1), message: msg },
+        body: { grade: ctx.grade, cert: ctx.cert, mode: ctx.mode === 'view' ? 'view' : 'solve', contextText: active._contextText || '', history: active.history.slice(0, -1), message: msg },
       });
       if (!res.ok) {
         const d = await res.json().catch(() => ({}));

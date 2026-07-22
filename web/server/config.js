@@ -17,10 +17,14 @@ const DEFAULT_PORT = 4525;
 const MAX_PORT = 4535;
 
 // CLI 브리지 기본 명령(사용자 확정, config로 재정의 가능).
+// questionsModel: 문항 단위 추출(비전 판독) 잡이 claude CLI에 넘길 --model 값.
+//   추출 품질이 좌우되는 작업이라 대화용 기본 모델(Fable 등)에 휩쓸리지 않게 항상 고정한다.
+//   기본 opus(=Opus 4.8). config.json 으로 재정의 가능(빈 값이면 --model 미지정=CLI 기본).
 const DEFAULT_CONFIG = Object.freeze({
   nickname: null,
   cliChat: 'agy --dangerously-skip-permissions',
   cliRecord: 'claude --dangerously-skip-permissions',
+  questionsModel: 'opus',
   port: DEFAULT_PORT,
 });
 

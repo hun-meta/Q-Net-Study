@@ -210,6 +210,37 @@ function connectSse() {
     }
   });
 
+  // 문항 추출 진행/완료(questions-*): 업로드·수동등록·백필 후 백그라운드 잡의 통지.
+  es.addEventListener('questions-progress', (evt) => {
+    try {
+      window.dispatchEvent(
+        new CustomEvent('qnet:questions-progress', { detail: JSON.parse(evt.data) })
+      );
+    } catch (_e) {
+      /* noop */
+    }
+  });
+  es.addEventListener('questions-done', (evt) => {
+    try {
+      const detail = JSON.parse(evt.data); // { jobId, examId, ok, 존재수?, 문항수?, 누락문번?, 검증오류?, error? }
+      window.dispatchEvent(new CustomEvent('qnet:questions-done', { detail }));
+      const say = (message, type) =>
+        window.dispatchEvent(new CustomEvent('qnet:toast', { detail: { message, type } }));
+      if (detail.ok) {
+        say(`문항 추출 완료 — ${detail.examId} (${detail.존재수}/${detail.문항수})`, 'ok');
+      } else {
+        const 사유 =
+          detail.error ||
+          (detail.누락문번 && detail.누락문번.length
+            ? `누락 ${detail.누락문번.length}문항`
+            : '검증 오류');
+        say(`문항 추출 실패 — ${detail.examId}: ${사유}`, 'error');
+      }
+    } catch (_e) {
+      /* noop */
+    }
+  });
+
   return es;
 }
 

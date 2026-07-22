@@ -37,7 +37,7 @@ const { serialize } = require('./cliBridge'); // 저장소 쓰기를 CLI 잡과 
 const PUBLIC_DIR = path.join(__dirname, '..', 'public');
 
 // 완료 시 자동 마운트될 워커 기능 모듈(파일명 계약). 없으면 스킵.
-const FEATURE_MODULES = ['./examList', './attemptRoutes', './conceptRoutes', './cliRoutes', './microworldRoutes'];
+const FEATURE_MODULES = ['./examList', './attemptRoutes', './conceptRoutes', './cliRoutes', './microworldRoutes', './questionRoutes'];
 
 // 이름(종류·자격증) 검증용: 경로 구분자/제어문자 금지.
 const NAME_INVALID = /[\\/\0\r\n\t]/;

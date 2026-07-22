@@ -167,6 +167,9 @@ export function renderUploadPanel(container, scope, onDone) {
         setStep('verify', 'done');
         setStep('register', 'done');
         toast(`${id} 등록 완료 — 문항 ${data.문항수}, 숨김 ${data.숨김페이지수}`, 'ok');
+        if (data.questionsJobId) {
+          toast('문항 원문 추출을 백그라운드에서 진행해요 — 완료되면 알려드릴게요.', 'info');
+        }
         setTimeout(() => {
           renderIdle();
           if (onDone) onDone();

@@ -18,10 +18,19 @@
 const { spawn } = require('child_process');
 const logger = require('./logger');
 
-// 잡 타임아웃(ms) — 추출 5분 / 정리 10분 / 챗 3분 / 마이크로월드 생성 5분.
+// 잡 타임아웃(ms) — 추출 5분 / 정리 10분 / 챗 3분 / 마이크로월드 생성 5분 / 문항추출 10분.
 // 정리(record)는 문항 PDF 판독 + 출제기준 매핑 + 노트·풀이 2곳 쓰기로 가장 무거워,
 // 기존 2분(120s)으로는 자주 미완주(타임아웃 kill)했다 — 넉넉히 10분으로 상향.
-const TIMEOUTS = Object.freeze({ extract: 300000, record: 600000, chat: 180000, microworld: 300000 });
+// 문항추출(questions)은 과목 단위(≈20문항 비전 판독 + 파일 20개 쓰기)로 청킹된 잡이라 10분.
+const TIMEOUTS = Object.freeze({
+  extract: 300000,
+  record: 600000,
+  chat: 180000,
+  microworld: 300000,
+  // 문항추출: Opus로 20문항 판독+전사가 느린 과목은 8~11분까지 걸려 10분은 빠듯했다.
+  // 20분으로 상향(절전 복구 시 kill·정상 과목 타임아웃으로 인한 공백 방지).
+  questions: 1200000,
+});
 const KILL_GRACE_MS = 2000;
 
 // config 명령 문자열("agy --dangerously-skip-permissions")을 { file, baseArgs }로 분해.
@@ -259,6 +268,55 @@ function buildExtractPrompt({ pdfPath, answerPath, examId }) {
   ].join('\n');
 }
 
+// 문항 단위 추출 프롬프트: 기출 PDF의 지정 문번 범위를 판독해 문항별 md 파일 작성.
+// 청킹: 잡 1개 = 과목 1개(정답 md의 과목 범위). 정답 값은 서버가 정답 md에서 파싱해
+// 프롬프트에 인라인으로 넣어준다(비전 오독 원천 차단 — claude는 복사만 한다).
+// 정답표: [{ 문번, 정답표시('①'~'④') }]
+function buildQuestionsPrompt({ pdfPath, examId, outDir, 과목명, 시작, 끝, 정답표, today }) {
+  const 정답행 = (정답표 || [])
+    .map((r) => `| ${r.문번} | ${r.정답표시 || ''} |`)
+    .join('\n');
+  return [
+    '# 작업: 기출 PDF에서 지정 범위 문항을 판독해 문항별 md 파일 작성',
+    `- 입력 PDF: ${pdfPath}`,
+    `- 시험 ID: ${examId}`,
+    `- 대상 과목: ${과목명} (문번 ${시작}~${끝})`,
+    `- 출력 디렉토리(반드시 이 안에만 작성): ${outDir}`,
+    `- 각 문항의 출력 파일: ${outDir}/{문번}.md (예: ${outDir}/${시작}.md)`,
+    `- 오늘 날짜: ${today}`,
+    '',
+    '# 문항별 정답(아래 값을 frontmatter 정답에 그대로 복사하라 — PDF에서 판독하지 말 것)',
+    '| 문번 | 정답 |',
+    '|------|------|',
+    정답행,
+    '',
+    '# 출력 포맷(각 파일, 정확히 준수)',
+    '---',
+    `시험: ${examId}`,
+    '문번: <문번>',
+    `과목: ${과목명}`,
+    '정답: <위 표의 값(①~④)>',
+    '추출도구: claude',
+    `추출일: ${today}`,
+    '---',
+    '<문제 본문 — PDF의 해당 문항 전문을 그대로 옮긴다. 문번 숫자는 본문에서 뺀다>',
+    '',
+    '① <선택지1>',
+    '② <선택지2>',
+    '③ <선택지3>',
+    '④ <선택지4>',
+    '',
+    '# 판독 규칙',
+    '- PDF 텍스트 레이어는 읽기 순서가 뒤섞여 있을 수 있다 — 페이지를 시각적으로 판독해 올바른 순서로 옮겨라.',
+    '- 코드·SQL·표·다이어그램이 포함된 문항은 마크다운(코드펜스 ```, 표, 텍스트 서술)으로 정확히 전사한다.',
+    '- <보기>·지문 상자가 있으면 본문에 인용 블록(>)으로 포함한다.',
+    '- 특정 문항을 판독할 수 없으면 그 파일의 본문 첫 줄에 `> ⚠️ 판독 불가: <사유>` 를 쓰고',
+    '  선택지는 판독 가능한 만큼만 기록한다(파일은 반드시 생성 — 건너뛰지 말 것).',
+    `- 문번 ${시작}~${끝} 범위의 파일(${끝 - 시작 + 1}개)을 전부 만들어라. 범위 밖 문항은 다루지 말라.`,
+    '- 출력 디렉토리 밖의 어떤 파일도 만들거나 고치지 말라.',
+  ].join('\n');
+}
+
 // 마이크로월드 생성 프롬프트: 시험 개념을 조작 가능한 단일 HTML 시뮬레이션으로 작성.
 // 산출물은 웹 앱이 샌드박스 iframe(allow-scripts, same-origin 없음)으로 임베드하므로
 // localStorage·network 사용 금지가 필수다.
@@ -447,6 +505,69 @@ function createBridge(deps) {
     });
   }
 
+  // 문항 단위 추출(claude 직접 쓰기): 과목 범위의 문항별 md 작성. 잡 후 문항 디렉토리 감사.
+  // jobKind='questions' 는 audit 에서 extract 와 동일하게 목적지 경계로만 통제된다.
+  function extractQuestions(params) {
+    return enqueue(async () => {
+      if (!cli.record) {
+        const err = new Error('claude(기록) CLI 가 감지되지 않았습니다.');
+        err.code = 'ECLIUNAVAILABLE';
+        throw err;
+      }
+      const { file, baseArgs } = recordCmd();
+      const prompt = buildQuestionsPrompt(params);
+      // 모델 고정: 문항 비전 판독은 품질이 핵심이라 대화용 기본 모델에 휩쓸리지 않게
+      // config.questionsModel(기본 opus=Opus 4.8)을 --model 로 명시한다. 빈 값이면 CLI 기본.
+      const model = params.model != null ? params.model : config.questionsModel;
+      const modelArgs = model ? ['--model', model] : [];
+      logger.info('questions 시작', {
+        examId: params.examId,
+        과목명: params.과목명,
+        범위: `${params.시작}-${params.끝}`,
+        model: model || '(CLI 기본)',
+        timeoutMs: TIMEOUTS.questions,
+      });
+      const snap = audit.snapshot({
+        monitorRoots: params.monitorRoots,
+        integrityTargets: params.integrityTargets || [],
+        repoRoot,
+      });
+      const res = await runProcess(
+        file,
+        [
+          ...baseArgs,
+          ...modelArgs,
+          '-p',
+          prompt,
+          '--append-system-prompt',
+          GUARD_PROMPT,
+          '--add-dir',
+          repoRoot,
+          '--output-format',
+          'stream-json',
+          '--verbose',
+        ],
+        { cwd: repoRoot, timeoutMs: TIMEOUTS.questions, label: 'questions' }
+      );
+      const parsed = parseClaudeStreamJson(res.stdout);
+      const report = audit.audit(snap, {
+        jobKind: 'questions',
+        destinations: params.auditDestinations || [],
+        nickname: params.nickname,
+        repoRoot,
+      });
+      logger.info('questions 완료', {
+        examId: params.examId,
+        과목명: params.과목명,
+        timedOut: res.timedOut,
+        isError: parsed.isError,
+        auditClean: report.clean,
+        violations: report.violations || [],
+      });
+      return { result: parsed.result, isError: parsed.isError, timedOut: res.timedOut, audit: report };
+    });
+  }
+
   // 마이크로월드 생성(claude 직접 쓰기): 지정 경로에 단일 HTML 작성. 잡 후 목적지 감사.
   // jobKind='microworld' 는 audit 에서 record/extract 와 동일하게 목적지 경계로만 통제된다.
   function microworld(params) {
@@ -490,7 +611,7 @@ function createBridge(deps) {
     });
   }
 
-  return { chat, record, extract, microworld, enqueue };
+  return { chat, record, extract, extractQuestions, microworld, enqueue };
 }
 
 module.exports = {
@@ -503,6 +624,7 @@ module.exports = {
   buildChatPrompt,
   buildRecordPrompt,
   buildExtractPrompt,
+  buildQuestionsPrompt,
   buildMicroworldPrompt,
   GUARD_PROMPT,
   TIMEOUTS,

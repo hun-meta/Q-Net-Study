@@ -19,7 +19,9 @@ const pdfSubset = require('./pdfSubset');
 const draftStore = require('./draftStore');
 const nickname = require('./nickname');
 const security = require('./security');
-const { serialize } = require('./cliBridge'); // 저장소 쓰기를 CLI 잡과 직렬화(감사 오인 방지)
+const questionStore = require('./questionStore');
+const questionRunner = require('./questionRunner');
+const { serialize, createBridge } = require('./cliBridge'); // 저장소 쓰기를 CLI 잡과 직렬화(감사 오인 방지)
 
 // 시험 id: {연도4자리}-{식별자(회차/상시일자)}-{필기|실기}. 경로 구분자·점 불허(탈출 차단).
 const EXAM_ID = /^(\d{4})-([0-9A-Za-z가-힣]+)-(필기|실기)$/;
@@ -163,12 +165,21 @@ function listExams(repoRoot, grade, cert) {
     const 정답등록 = fs.existsSync(path.join(정답Dir, `${id}.md`));
     // 숨김페이지수 확정 여부(INDEX 또는 정답 md). 미확정이면 null → 열람 불가(fail-closed).
     let hc = row && Number.isFinite(Number(row.숨김페이지수)) ? Number(row.숨김페이지수) : null;
-    if (hc == null && 정답등록) {
+    let 문항수값 =
+      row && /^\d+$/.test(String(row.문항수)) && Number(row.문항수) > 0
+        ? Number(row.문항수)
+        : null;
+    if ((hc == null || 문항수값 == null) && 정답등록) {
       const p = answerKey.parse(fs.readFileSync(path.join(정답Dir, `${id}.md`), 'utf8'), {
         시험ID: id,
       });
-      hc = Number.isFinite(Number(p.숨김페이지수)) ? Number(p.숨김페이지수) : 0;
+      if (hc == null) hc = Number.isFinite(Number(p.숨김페이지수)) ? Number(p.숨김페이지수) : 0;
+      if (문항수값 == null && Number.isInteger(p.문항수) && p.문항수 > 0) 문항수값 = p.문항수;
     }
+    // 문항 단위 추출 완비 여부(파일 시스템 파생 — INDEX 마커 없음). 문항수 미상 시 false.
+    const 문항추출 =
+      문항수값 != null &&
+      questionStore.completeness(repoRoot, grade, cert, id, 문항수값).완비;
     return {
       id,
       파일명: 파일명 || `${id}.pdf`,
@@ -180,6 +191,7 @@ function listExams(repoRoot, grade, cert) {
       채점가능: 정답등록 && pdf존재,
       숨김페이지수: hc != null ? hc : 0,
       숨김확정: hc != null,
+      문항추출,
       // 열람 가능 = PDF 존재 && 숨김페이지수 확정(미확정이면 /pdf가 409로 답지 유출 차단).
       열람가능: pdf존재 && hc != null,
       정답포함: row ? row.정답포함 : false,
@@ -436,7 +448,34 @@ function router(deps) {
       if (deps.hub && typeof deps.hub.broadcast === 'function') {
         deps.hub.broadcast('fs-change', { kind: 'answer-key', 시험ID: ctx.id });
       }
-      return res.json({ ok: true, 시험ID: ctx.id, 문항수: parsed.문항수, 숨김페이지수: parsed.숨김페이지수 });
+
+      // 문항 단위 추출 자동 시도(백그라운드): 수동 등록 기출도 PDF가 있으면 문항 md를
+      // 만들어 챗 컨텍스트를 경량화한다. 스캔 PDF라 실패할 수 있음 — 사유는 SSE·로그로
+      // 통지되고 실패해도 등록은 유효하다(막다른 길 없음).
+      let questionsJobId = null;
+      if (deps.cli && deps.cli.record) {
+        try {
+          const bridge = createBridge({ config: deps.config, repoRoot, cli: deps.cli });
+          const hubBroadcast =
+            deps.hub && typeof deps.hub.broadcast === 'function'
+              ? deps.hub.broadcast
+              : () => {};
+          const qr = questionRunner.start(
+            { repoRoot, bridge, broadcast: hubBroadcast },
+            { grade: ctx.grade, cert: ctx.cert, examId: ctx.id }
+          );
+          questionsJobId = qr.jobId || null;
+        } catch (qe) {
+          process.stderr.write(`[answer-key] ${ctx.id}: 문항 추출 시작 실패 — ${qe.message}\n`);
+        }
+      }
+      return res.json({
+        ok: true,
+        시험ID: ctx.id,
+        문항수: parsed.문항수,
+        숨김페이지수: parsed.숨김페이지수,
+        questionsJobId,
+      });
     } catch (err) {
       const code = err.code === 'EWRITEBOUNDARY' ? 403 : 500;
       return res.status(code).json({ error: err.message });

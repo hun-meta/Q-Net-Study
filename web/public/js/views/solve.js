@@ -151,8 +151,10 @@ export async function mount(container, { grade, cert, examId, mode }) {
     });
 
   // ── OMR / 정답표 ──
-  const openConcept = (qno) => openPanel({ grade, cert, examId }, qno, 'concept');
-  const openChat = (qno) => openPanel({ grade, cert, examId }, qno, 'chat');
+  // mode를 패널에 전달 — 챗 컨텍스트의 정답 포함 여부는 서버가 mode로 결정한다(solve=제외).
+  const panelCtx = { grade, cert, examId, mode: isView ? 'view' : 'solve' };
+  const openConcept = (qno) => openPanel(panelCtx, qno, 'concept');
+  const openChat = (qno) => openPanel(panelCtx, qno, 'chat');
 
   if (isView) {
     await mountViewMode();
