@@ -170,10 +170,8 @@ export async function mount(container, { grade, cert, examId, mode }) {
     if (e.metaKey || e.ctrlKey || e.altKey) return;
     const c = active.omrCtrl && active.omrCtrl.등록 ? active.omrCtrl : null;
     const code = e.code;
-    if (code === 'Escape') {
-      closePanel();
-      return;
-    }
+    // Esc로 패널을 닫지 않는다 — 채팅 이력의 의도치 않은 소실 방지.
+    // 패널은 오직 헤더의 X 버튼(panel-close)으로만 닫힌다.
     if (!c) return;
     if (/^(Digit|Numpad)[1-4]$/.test(code)) {
       if (c.current != null) {

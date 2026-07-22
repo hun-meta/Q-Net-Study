@@ -57,10 +57,11 @@ export function closePanel() {
 
 export function openPanel(ctx, qno, tab) {
   closePanel();
+  // 오버레이는 클릭을 가로채지 않는 레이어(pointer-events: none, CSS)로 두어,
+  // 패널이 열려 있어도 뒤의 문제 화면(PDF·OMR)을 그대로 조작할 수 있게 한다.
+  // 패널은 오직 헤더의 X 버튼으로만 닫힌다(바깥 클릭·Esc로 닫지 않음 → 채팅 이력 보존).
   const overlay = el('div', 'panel-overlay');
-  overlay.addEventListener('click', closePanel);
   const aside = el('aside', 'panel');
-  aside.addEventListener('click', (e) => e.stopPropagation());
 
   // 헤더: 탭 + #문번 + 닫기.
   const head = el('div', 'panel-head');

@@ -993,7 +993,9 @@ body.route-solve .app-main { overflow: hidden; }
 /* --------------------------------------------------------------------------
    슬라이드오버 패널 (components/panel.js) — 개념 · 챗
    -------------------------------------------------------------------------- */
-.panel-overlay { position: fixed; inset: 0; z-index: 70; background: rgba(0, 0, 0, .34); }
+/* 오버레이는 클릭을 가로채지 않는다(pointer-events: none) — 뒤의 문제 화면을 그대로 조작.
+   어두운 배경도 제거해 문제 화면이 가려지지 않게 한다. 패널만 클릭 가능(.panel). */
+.panel-overlay { position: fixed; inset: 0; z-index: 70; pointer-events: none; }
 .panel {
   position: fixed;
   top: 0;
@@ -1002,6 +1004,7 @@ body.route-solve .app-main { overflow: hidden; }
   width: 904px;
   max-width: 94vw;
   z-index: 71;
+  pointer-events: auto;
   background: var(--surface);
   border-left: 1px solid var(--border);
   box-shadow: var(--shadow-lg);
