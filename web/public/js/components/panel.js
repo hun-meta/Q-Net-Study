@@ -5,6 +5,34 @@ import { apiFetch, getState } from '../store.js';
 
 const enc = encodeURIComponent;
 
+// marked(마크다운→HTML) 지연 로더 — 챗 응답을 개념 탭처럼 md 렌더로 보여준다.
+// 로드 실패 시 null 을 캐시해 이후엔 평문(textContent) 폴백으로 조용히 동작한다.
+let _marked = null;
+let _markedTried = false;
+async function ensureMarked() {
+  if (_markedTried) return _marked;
+  _markedTried = true;
+  try {
+    const mod = await import('/vendor/marked.js');
+    const m = mod.marked || mod.default;
+    _marked = m && typeof m.parse === 'function' ? m : null;
+  } catch (_e) {
+    _marked = null;
+  }
+  return _marked;
+}
+// 완료된 어시스턴트 버블에 마크다운을 렌더(실패 시 평문 유지).
+async function renderMd(bubbleEl, text) {
+  const mk = await ensureMarked();
+  const s = String(text || '');
+  if (mk) {
+    bubbleEl.innerHTML = mk.parse(s);
+    bubbleEl.classList.add('md');
+  } else {
+    bubbleEl.textContent = s;
+  }
+}
+
 function el(tag, cls, text) {
   const node = document.createElement(tag);
   if (cls) node.className = cls;
@@ -290,8 +318,11 @@ function renderChatTab() {
   inputRow.append(input, send);
   footer.append(approveBtn, inputRow);
 
-  // 이력 재표시(탭 전환 후 복원).
-  for (const m of active.history) bubble(log, m.role, m.text);
+  // 이력 재표시(탭 전환 후 복원). 어시스턴트 메시지는 마크다운으로 렌더.
+  for (const m of active.history) {
+    const bb = bubble(log, m.role, m.text);
+    if (m.role === 'assistant') renderMd(bb.bubbleEl, m.text);
+  }
 
   async function ask() {
     const msg = input.value.trim();
@@ -327,6 +358,7 @@ function renderChatTab() {
         }
       });
       stopCursor(ans);
+      if (acc && !ans.bubbleEl.classList.contains('error')) renderMd(ans.bubbleEl, acc);
       active.history.push({ role: 'assistant', text: acc });
       approveBtn.disabled = false;
     } catch (e) {

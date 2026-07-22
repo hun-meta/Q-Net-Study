@@ -63,6 +63,23 @@ test('runProcess: 타임아웃 시 프로세스 kill + timedOut=true', async () 
   assert.strictEqual(res.timedOut, true);
 });
 
+test('buildChatPrompt: 챗봇 역할·파일읽기 금지 지시 + 컨텍스트·질문 포함', () => {
+  const p = bridgeMod.buildChatPrompt({
+    contextText: '[문항 원문]\n1번 문제 본문',
+    history: [{ role: 'user', text: '이전 질문' }],
+    message: '왜 2번이 답이야?',
+  });
+  // 역할 지시가 맨 앞에 온다.
+  assert.ok(p.startsWith('# 역할'), p.slice(0, 40));
+  // 파일/도구 사용 금지 지시(느린 PDF 읽기 방지의 핵심).
+  assert.ok(/파일을 열거나 읽지 말고/.test(p), '파일읽기 금지 지시 없음');
+  assert.ok(/도구도\s*\n?실행하지 말라|도구도.*실행하지 말라/.test(p) || /pdftotext/.test(p), '도구 실행 금지 지시 없음');
+  // 컨텍스트·이전 대화·이번 질문이 모두 담긴다.
+  assert.ok(p.includes('1번 문제 본문'));
+  assert.ok(p.includes('이전 질문'));
+  assert.ok(p.includes('왜 2번이 답이야?'));
+});
+
 test('buildRecordPrompt: 목적지·규칙·태그 지시 포함', () => {
   const p = bridgeMod.buildRecordPrompt({
     examId: '2023-1-필기',

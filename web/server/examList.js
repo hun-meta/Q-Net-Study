@@ -504,6 +504,22 @@ function router(deps) {
     return res.sendFile(p);
   });
 
+  // GET /vendor/marked.js → marked ESM 로컬 서빙(챗 응답 마크다운 렌더용, 외부 CDN 금지).
+  r.get('/vendor/marked.js', (req, res) => {
+    let p;
+    try {
+      // exports 제약 우회: 패키지 lib 디렉토리에서 ESM 빌드를 직접 가리킨다.
+      // eslint-disable-next-line global-require
+      p = path.join(path.dirname(require.resolve('marked')), 'marked.esm.js');
+      if (!fs.existsSync(p)) return res.status(404).end();
+    } catch (_e) {
+      return res.status(404).end();
+    }
+    res.type('text/javascript');
+    res.setHeader('Cache-Control', 'public, max-age=86400');
+    return res.sendFile(p);
+  });
+
   return r;
 }
 
