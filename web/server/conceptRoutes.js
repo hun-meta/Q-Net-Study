@@ -70,9 +70,13 @@ function parseSignatureSections(content) {
 }
 
 // 모든 자격증의 _공통/풀이/{examId}/{qno}.md 를 모아 서명 섹션 목록을 만든다.
-function collectSolutions(repoRoot, examId, qno) {
+function collectSolutions(repoRoot, examId, qno, scope) {
   const out = [];
+  const gradeFilter = scope && scope.grade;
+  const certFilter = scope && scope.cert;
   for (const { grade, cert } of repo.scanRepo(repoRoot)) {
+    if (gradeFilter && grade !== gradeFilter) continue;
+    if (certFilter && cert !== certFilter) continue;
     const solPath = path.join(repo.commonDir(repoRoot, grade, cert), '풀이', examId, `${qno}.md`);
     // 방어적 경계 검증: 풀이 디렉토리 밖이면 건너뜀.
     let real;
@@ -176,7 +180,14 @@ function router(deps) {
     }
 
     const me = nickname.getNickname();
-    const refs = tagIndex.query(index, examId, qno);
+    // 자격증 스코프(선택): grade/cert 쿼리가 주어지면 같은 시험ID를 공유하는
+    // 타 자격증의 노트/해설이 섞여 들어가는 것을 차단한다(기사·산업기사 시험ID 중복).
+    const grade = req.query.grade ? safeSeg(req.query.grade) : null;
+    const cert = req.query.cert ? safeSeg(req.query.cert) : null;
+    let refs = tagIndex.query(index, examId, qno);
+    if (grade || cert) {
+      refs = refs.filter((ref) => (!grade || ref.grade === grade) && (!cert || ref.cert === cert));
+    }
     const 노트 = [];
     for (const ref of refs) {
       const abs = path.join(deps.repoRoot, ref.relPath);
@@ -201,7 +212,7 @@ function router(deps) {
       });
     }
 
-    const 해설 = collectSolutions(deps.repoRoot, examId, qno).map((s) => ({
+    const 해설 = collectSolutions(deps.repoRoot, examId, qno, { grade, cert }).map((s) => ({
       ...s,
       본문html: render(s.본문),
     }));

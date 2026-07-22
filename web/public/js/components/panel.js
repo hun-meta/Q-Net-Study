@@ -121,7 +121,8 @@ async function renderConceptTab() {
   bodyEl.innerHTML = '<p class="loading" style="padding:18px">개념·풀이를 불러오는 중…</p>';
   let data;
   try {
-    const res = await fetch(`/api/concept/${enc(ctx.examId)}/${enc(qno)}`);
+    const qs = ctx.grade && ctx.cert ? `?grade=${enc(ctx.grade)}&cert=${enc(ctx.cert)}` : '';
+    const res = await fetch(`/api/concept/${enc(ctx.examId)}/${enc(qno)}${qs}`);
     data = await res.json();
     if (!res.ok) throw new Error(data.error || '개념 보기를 불러오지 못했어요.');
   } catch (e) {
