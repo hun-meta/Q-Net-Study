@@ -25,6 +25,13 @@ test('write → read 라운드트립 + examId·updatedAt 스탬프', () => {
   assert.strictEqual(read.examId, '2023-1-필기');
 });
 
+test('정답열람 필드 라운드트립(화이트리스트 없음 — 임의 객체 키 보존)', () => {
+  draftStore.writeDraft('hun', '2023-2-필기', { answers: { 1: 2 }, 찍음: { 1: true }, 정답열람: { 1: true, 3: true } }, base);
+  const read = draftStore.readDraft('hun', '2023-2-필기', base);
+  assert.deepStrictEqual(read.정답열람, { 1: true, 3: true });
+  assert.deepStrictEqual(read.찍음, { 1: true });
+});
+
 test('없는 드래프트 → null', () => {
   assert.strictEqual(draftStore.readDraft('hun', '2099-9-필기', base), null);
 });

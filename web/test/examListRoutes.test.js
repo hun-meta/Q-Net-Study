@@ -147,6 +147,34 @@ test('POST /api/exams/:id/answer-key — 수동 정답 저장 → 정답 md·IND
   assert.strictEqual(doc.getPageCount(), 2);
 });
 
+test('GET /api/exams/:id/answer/:qno — 등록 기출 유효 문번 → 단건 정답 반환', async () => {
+  const res = await fetch(`${baseUrl}/api/exams/2023-1-필기/answer/1?${q}`);
+  assert.strictEqual(res.status, 200);
+  const body = await res.json();
+  assert.strictEqual(body.id, '2023-1-필기');
+  assert.strictEqual(body.문번, 1);
+  assert.strictEqual(body.정답, 3); // 정답 md의 1번 = ③
+  const res2 = await fetch(`${baseUrl}/api/exams/2023-1-필기/answer/2?${q}`);
+  assert.strictEqual((await res2.json()).정답, 1); // 2번 = ①
+});
+
+test('GET /api/exams/:id/answer/:qno — 정답 미등록 기출 404', async () => {
+  const res = await fetch(`${baseUrl}/api/exams/2020-1-필기/answer/1?${q}`);
+  assert.strictEqual(res.status, 404);
+});
+
+test('GET /api/exams/:id/answer/:qno — 범위 밖 문번 400', async () => {
+  const res = await fetch(`${baseUrl}/api/exams/2023-1-필기/answer/3?${q}`); // 문항수 2
+  assert.strictEqual(res.status, 400);
+  const res0 = await fetch(`${baseUrl}/api/exams/2023-1-필기/answer/0?${q}`);
+  assert.strictEqual(res0.status, 400);
+});
+
+test('GET /api/exams/:id/answer/:qno — 비정수 문번 400', async () => {
+  const res = await fetch(`${baseUrl}/api/exams/2023-1-필기/answer/abc?${q}`);
+  assert.strictEqual(res.status, 400);
+});
+
 test('POST /api/exams/:id/answer-key — 정답 누락 등 검증 실패 시 400 + 검증오류', async () => {
   const body = { 숨김페이지수: 0, 과목들: [{ 과목명: '과목', 시작: 1, 끝: 2, 정답: { 1: 2 } }] };
   const res = await fetch(`${baseUrl}/api/exams/2020-1-필기/answer-key?${q}`, {

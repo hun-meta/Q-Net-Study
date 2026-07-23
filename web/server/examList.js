@@ -365,6 +365,39 @@ function router(deps) {
     });
   });
 
+  // GET /api/exams/:id/answer/:qno?grade=&cert= → 단일 문항 정답(1~4 정수).
+  // solve(시험치기) 모드에서 사용자가 "정답 보기"로 명시 요청한 문항 하나만 노출한다.
+  // /answers(전체표)를 재사용하지 않는 이유: solve 모드의 설계 원칙(정답은 사용자가
+  // 문항 단위로 명시 요청할 때만 클라이언트로 내려간다)을 유지하기 위해서다. 전체 정답표를
+  // 흘리면 답지 유출 방지 설계가 무너지므로, 요청한 문항의 정답만 응답한다.
+  r.get('/api/exams/:id/answer/:qno', (req, res) => {
+    const ctx = resolveCtx(req, res, true);
+    if (!ctx) return undefined;
+    const 정답Path = path.join(기출Dir(repoRoot, ctx.grade, ctx.cert), 정답, `${nfc(ctx.id)}.md`);
+    if (!fs.existsSync(정답Path)) {
+      return res.status(404).json({ error: '정답이 등록되지 않은 기출입니다.' });
+    }
+    const parsed = answerKey.parse(fs.readFileSync(정답Path, 'utf8'), { 시험ID: ctx.id });
+    // qno 검증: 정수 & 1~문항수 범위(밖·비정수 → 400). grade/cert 누락은 resolveCtx가 처리.
+    const qnoRaw = nfc(req.params.qno);
+    if (!/^\d+$/.test(qnoRaw)) {
+      return res.status(400).json({ error: '문번은 정수여야 합니다.' });
+    }
+    const 문번 = Number(qnoRaw);
+    if (문번 < 1 || 문번 > parsed.문항수) {
+      return res.status(400).json({ error: '문번이 범위를 벗어났습니다.' });
+    }
+    // 과목들에서 해당 문번의 정답을 찾는다(과목 범위 합 = 문항수이므로 정상 등록이면 존재).
+    let 정답값 = null;
+    for (const s of parsed.과목들) {
+      if (s.정답 && Object.prototype.hasOwnProperty.call(s.정답, 문번)) {
+        정답값 = s.정답[문번];
+        break;
+      }
+    }
+    return res.json({ id: ctx.id, 문번, 정답: 정답값 });
+  });
+
   // --- 임시저장(드래프트): 서버 소유 쓰기. 닉네임은 서버 config에서만 취득(클라 입력 아님) ---
 
   // GET /api/draft/:examId → 이어풀기용 저장 드래프트(없으면 null).
