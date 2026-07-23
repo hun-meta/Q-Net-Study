@@ -25,7 +25,7 @@ function 앱시작(deps) {
   });
 }
 
-function makeDeps(root, cli) {
+function makeDeps(root, cli, extra = {}) {
   const events = [];
   return {
     deps: {
@@ -34,6 +34,10 @@ function makeDeps(root, cli) {
       repoRoot: root,
       hub: { broadcast: (event, payload) => events.push({ event, payload }) },
       config: { cliChat: `node ${FAKE_AGY}`, cliRecord: `node ${FAKE_CLAUDE}` },
+      // 기본: Z.AI 비활성 고정 — 개발 머신 secrets.json 에 실 키가 등록돼 있어도
+      // 테스트가 실제 Z.AI API 로 새지 않게 한다(zai 경로 테스트만 extra 로 켠다).
+      resolveZai: () => ({ enabled: false, apiKey: '', source: null, baseUrl: '', model: '', effort: '' }),
+      ...extra,
     },
     events,
   };
@@ -205,6 +209,7 @@ test('챗: fake-agy NDJSON 스트리밍(chunk+done)', async () => {
     const done = events.find((e) => e.type === 'done');
     assert.ok(done);
     assert.strictEqual(done.audit.clean, true);
+    assert.strictEqual(done.usage, null); // usage는 zai 경로 전용 — agy 경로는 null 고정.
   } finally {
     started.server.close();
   }
@@ -221,6 +226,43 @@ test('챗: agy 미감지 → 503', async () => {
       body: JSON.stringify({ grade: '정보처리', cert: '정보처리기사', message: '질문' }),
     });
     assert.strictEqual(res.status, 503);
+    const data = await res.json();
+    assert.strictEqual(data.cli, 'chat');
+    assert.ok(data.error.includes('Z.AI'), 'zai 미등록도 안내에 포함돼야 함');
+  } finally {
+    started.server.close();
+  }
+});
+
+// [설계 A-4] 챗 가용성은 저장된 플래그가 아니라 사용 시점 파생값이다:
+// zai.enabled || cli.chat. agy 가 미감지여도 Z.AI 키가 등록돼 있으면 503 게이트를 통과한다.
+// (deps.resolveZai 주입으로 라우트 계약 검증을 config 파일 I/O와 격리한다 —
+//  파일 I/O 자체의 검증은 zaiChat.test.js 가 담당한다.)
+test('[A-4] zai 활성 + agy 미설치 → requireCli 통과(챗 라우트가 503으로 막히지 않음)', async () => {
+  const r9 = fs.mkdtempSync(path.join(os.tmpdir(), 'qnet-routes9-'));
+  const { deps } = makeDeps(
+    r9,
+    { chat: false, record: true }, // agy 미감지
+    {
+      resolveZai: () => ({
+        enabled: true,
+        apiKey: 'sk-test',
+        source: 'file',
+        baseUrl: 'https://api.z.ai/api/coding/paas/v4',
+        model: 'glm-5.2',
+        effort: 'none',
+      }),
+    }
+  );
+  const started = await 앱시작(deps);
+  try {
+    const res = await fetch(`${started.base}/api/chat/2023-1-필기/5`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ grade: '정보처리', cert: '정보처리기사', message: '질문' }),
+    });
+    assert.notStrictEqual(res.status, 503, `zai 활성인데도 503으로 막힘: ${await res.text()}`);
+    assert.strictEqual(res.status, 200);
   } finally {
     started.server.close();
   }

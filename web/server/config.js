@@ -11,6 +11,10 @@ const net = require('net');
 const REPO_ROOT = path.resolve(__dirname, '..', '..');
 const STATE_DIR = path.join(REPO_ROOT, '.qnet-web');
 const CONFIG_PATH = path.join(STATE_DIR, 'config.json');
+// Z.AI API Key 등 비밀은 config.json과 분리 저장한다 — config.json은 감사 무결성
+// 해시 대상이라 CLI 잡 실행 중 등록하면 무결성 위반→잡 전체 원복이 발생한다.
+// secrets.json은 감사 walk 제외(.qnet-web) + 무결성 대상이 아니라 언제든 안전하게 쓸 수 있다.
+const SECRETS_PATH = path.join(STATE_DIR, 'secrets.json');
 
 // 포트 정책: 4525 기본, 점유 시 4526~4535 순차 탐색, 상한 초과 시 명시적 실패.
 const DEFAULT_PORT = 4525;
@@ -81,16 +85,86 @@ async function findAvailablePort(startPort = DEFAULT_PORT, endPort = MAX_PORT) {
   );
 }
 
+// Z.AI 챗 프로바이더 기본값(상수). 환경변수가 있으면 환경변수 우선(resolveZai 참고).
+// model 은 glm-5.2 고정 기본. effort 'none' = deep think(thinking) 비활성
+// — 챗은 빠른 답변이 목적이므로 기본으로 사고 모드를 끈다.
+const ZAI_DEFAULTS = Object.freeze({
+  baseUrl: 'https://api.z.ai/api/coding/paas/v4', // coding plan 엔드포인트
+  model: 'glm-5.2',
+  effort: 'none',
+});
+
+// secrets.json({ zaiApiKey })에서 Z.AI 키를 읽는다. 파일이 없거나 손상 시 빈 문자열.
+function readZaiKey() {
+  try {
+    const raw = fs.readFileSync(SECRETS_PATH, 'utf8');
+    const data = JSON.parse(raw);
+    return typeof data.zaiApiKey === 'string' ? data.zaiApiKey : '';
+  } catch (err) {
+    return '';
+  }
+}
+
+// tmp→rename 원자 쓰기 + mode 0o600(소유자 전용)으로 Z.AI 키를 저장한다.
+// 형식 검증만 하고 저장한다(빈 값·제어문자·개행 불가) — 유효성은 첫 챗 호출의
+// 401/403 오류가 자연히 드러내며, 등록 시점 원격 검증으로 지연·토큰을 쓰지 않는다.
+function saveZaiKey(key) {
+  const trimmed = String(key == null ? '' : key).trim();
+  if (!trimmed) throw new Error('API Key가 비어 있습니다.');
+  if (/[\x00-\x1f\x7f]/.test(trimmed)) {
+    throw new Error('API Key에 제어문자·개행을 포함할 수 없습니다.');
+  }
+  ensureStateDir();
+  const tmp = path.join(STATE_DIR, `.secrets.${process.pid}.${Date.now()}.tmp`);
+  fs.writeFileSync(tmp, JSON.stringify({ zaiApiKey: trimmed }, null, 2) + '\n', { mode: 0o600 });
+  fs.chmodSync(tmp, 0o600); // writeFileSync의 mode는 신규 생성 시에만 적용 — rename 전 명시적으로 재보장.
+  fs.renameSync(tmp, SECRETS_PATH);
+  return trimmed;
+}
+
+// secrets.json에서 Z.AI 키를 제거한다(파일이 없으면 no-op).
+function deleteZaiKey() {
+  try {
+    fs.unlinkSync(SECRETS_PATH);
+  } catch (err) {
+    if (err.code !== 'ENOENT') throw err;
+  }
+}
+
+// Z.AI 설정을 호출 시점에 파생한다(부팅 1회 고정 아님 — UI로 키를 등록·삭제해도
+// 재기동 없이 다음 호출부터 즉시 반영된다). 키 우선순위: env ZAI_API_KEY >
+// secrets.json > 없음(비활성). baseUrl·model·effort는 env > ZAI_DEFAULTS. 모든 값 트림.
+function resolveZai(env = process.env) {
+  const e = env || {};
+  const envKey = String(e.ZAI_API_KEY || '').trim();
+  const fileKey = envKey ? '' : readZaiKey();
+  const apiKey = envKey || fileKey;
+  return {
+    enabled: !!apiKey,
+    apiKey,
+    source: envKey ? 'env' : fileKey ? 'file' : null,
+    baseUrl: String(e.ZAI_BASE_URL || '').trim() || ZAI_DEFAULTS.baseUrl,
+    model: String(e.ZAI_MODEL || '').trim() || ZAI_DEFAULTS.model,
+    effort: String(e.ZAI_EFFORT || '').trim() || ZAI_DEFAULTS.effort,
+  };
+}
+
 module.exports = {
   REPO_ROOT,
   STATE_DIR,
   CONFIG_PATH,
+  SECRETS_PATH,
   DEFAULT_PORT,
   MAX_PORT,
   DEFAULT_CONFIG,
+  ZAI_DEFAULTS,
   ensureStateDir,
   loadConfig,
   saveConfig,
   isPortFree,
   findAvailablePort,
+  readZaiKey,
+  saveZaiKey,
+  deleteZaiKey,
+  resolveZai,
 };

@@ -83,6 +83,9 @@ async function start() {
   ]);
   const cli = { chat: chatAvailable, record: recordAvailable };
 
+  // 배너 표기용 Z.AI 상태(부팅 시점 1회 조회) — agy 감지·재검사는 zai 와 무관하게 그대로 유지된다.
+  const zai = config.resolveZai();
+
   const hub = createSseHub();
 
   const app = createApp({
@@ -111,7 +114,9 @@ async function start() {
       'Q-Net 기출 풀이 로컬 웹 앱',
       `주소:   http://127.0.0.1:${port}`,
       `닉네임: ${cfg.nickname || '(미설정 — 접속 후 선택)'}`,
-      `agy(챗):    ${cli.chat ? '감지됨 ✅' : '미설치 ⚠️ (핵심 루프는 정상 동작)'}`,
+      zai.enabled
+        ? `챗: Z.AI API (${zai.model} · ${zai.effort === 'none' ? 'thinking off' : zai.effort}) ✅`
+        : `agy(챗):    ${cli.chat ? '감지됨 ✅' : '미설치 ⚠️ (핵심 루프는 정상 동작)'}`,
       `claude(기록): ${cli.record ? '감지됨 ✅' : '미설치 ⚠️ (핵심 루프는 정상 동작)'}`,
       '종료: Ctrl+C',
     ]);

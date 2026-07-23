@@ -86,16 +86,21 @@ function parse(content) {
   };
 }
 
-// frontmatter의 `정답:` 줄만 제거한 md 반환(챗 solve 모드 주입용 — 서버 소유 스트립).
-function stripAnswer(content) {
+// frontmatter 블록에서 keyRe에 걸리는 줄만 제거한 md 반환(본문·다른 키 보존).
+function frontmatter줄제거(content, keyRe) {
   const src = String(content);
   const m = src.match(/^(﻿?---\s*\r?\n)([\s\S]*?)(\r?\n---\s*(?:\r?\n|$))/);
   if (!m) return src;
   const 블록 = m[2]
     .split(/\r?\n/)
-    .filter((line) => !/^\s*정답\s*:/.test(line))
+    .filter((line) => !keyRe.test(line))
     .join('\n');
   return m[1] + 블록 + m[3] + src.slice(m[0].length);
+}
+
+// frontmatter의 `정답:` 줄만 제거한 md 반환(챗 solve 모드 주입용 — 서버 소유 스트립).
+function stripAnswer(content) {
+  return frontmatter줄제거(content, /^\s*정답\s*:/);
 }
 
 // 파일 읽기(경계 검증 포함). 부재·경계 밖·읽기 실패 시 null.
@@ -194,8 +199,10 @@ function validate(parsedQuestion, answerKeyParsed, qno) {
 function buildChatContext({ 원문md, mode, clientContext }) {
   const parts = [];
   if (원문md) {
+    // 추출도구·추출일은 모델에 무의미한 노이즈 — 항상 제거해 캐싱되는 접두사를 줄인다.
+    const 정리 = frontmatter줄제거(String(원문md), /^\s*(추출도구|추출일)\s*:/);
     parts.push('[문항 원문]');
-    parts.push(mode === 'view' ? String(원문md).trim() : stripAnswer(String(원문md)).trim());
+    parts.push(mode === 'view' ? 정리.trim() : stripAnswer(정리).trim());
     parts.push('');
   }
   if (clientContext) parts.push(String(clientContext));

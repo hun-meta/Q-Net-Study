@@ -92,8 +92,12 @@ function 원자쓰기(target, buf) {
 
 function router(deps) {
   const { cli, repoRoot, hub, config } = deps;
+  // Z.AI 설정 해석기 주입 지점(기본: config.resolveZai — 요청 시점 평가 유지).
+  // 테스트가 비활성 스텁을 주입해, 개발 머신에 실 키가 등록돼 있어도
+  // 테스트 실행이 실제 Z.AI API 로 새지 않게 한다.
+  const resolveZai = deps.resolveZai || configMod.resolveZai;
   const r = express.Router();
-  const bridge = createBridge({ config, repoRoot, cli });
+  const bridge = createBridge({ config, repoRoot, cli, resolveZai });
   const broadcast = hub && typeof hub.broadcast === 'function' ? hub.broadcast : () => {};
 
   // 정리(record) 잡 레지스트리 — 요청/잡 수명 분리. POST 는 즉시 202+jobId 로 반환하고,
@@ -111,13 +115,18 @@ function router(deps) {
   }
 
   // CLI 가용성 게이트. 미설치/미로그인 → 503 + 폴백 안내(핵심 루프는 계속 동작).
+  // 챗 가용성은 저장된 플래그가 아니라 사용 시점 파생값이다: Z.AI 키가 등록돼 있으면
+  // agy 미감지 상태에서도 챗이 가능하다(설계 A-4).
   function requireCli(role, res) {
-    if (role === 'chat' && !cli.chat) {
-      res.status(503).json({
-        error: 'agy(챗) CLI 가 감지되지 않았습니다. 챗 기능은 비활성 상태이며 풀이·채점·기록은 정상 동작합니다.',
-        cli: 'chat',
-      });
-      return false;
+    if (role === 'chat') {
+      const chatAvailable = resolveZai().enabled || cli.chat;
+      if (!chatAvailable) {
+        res.status(503).json({
+          error: 'agy(챗) CLI 미설치·Z.AI API Key 미등록 — 챗 기능은 비활성 상태이며 풀이·채점·기록은 정상 동작합니다.',
+          cli: 'chat',
+        });
+        return false;
+      }
     }
     if (role === 'record' && !cli.record) {
       res.status(503).json({
@@ -292,7 +301,7 @@ function router(deps) {
 
   // ── 챗(agy 스트리밍, 표시만) ──────────────────────────────────────────
   // body: { grade, cert, mode:'solve'|'view', message, history:[{role,text}], contextText }
-  // 응답: NDJSON 스트림 — {"type":"chunk","text":..} 다수 + {"type":"done",audit} | {"type":"error"}.
+  // 응답: NDJSON 스트림 — {"type":"chunk","text":..} 다수 + {"type":"done",usage,audit} | {"type":"error"}.
   // 문항 컨텍스트는 서버가 조립한다: 문항 md가 있으면 원문을 주입하고(PDF 전체 참조 대체),
   // mode==='solve'(기본, 안전값)면 정답 줄을 서버가 제거한다 — 클라이언트 신뢰 금지.
   r.post('/api/chat/:examId/:qno', async (req, res) => {
@@ -338,6 +347,10 @@ function router(deps) {
         /* 문항 부재·파싱 실패 → 기존 컨텍스트(PDF 경로 참조) 폴백 */
       }
       const job = await bridge.chat({
+        // 검증 완료된 메타를 그대로 전달 — 프롬프트의 "# 문항 메타" 블록은 서버가 소유한다
+        // (클라이언트 contextText 에 의존하지 않음, buildChatMeta 참조).
+        grade: scope.grade,
+        cert: scope.cert,
         examId,
         qno,
         contextText,
@@ -351,7 +364,9 @@ function router(deps) {
       if (!job.audit.clean) {
         broadcast('audit-warning', { where: 'chat', violations: job.audit.violations });
       }
-      보냄({ type: 'done', timedOut: job.timedOut, audit: job.audit });
+      // usage: zai 경로만 채워진다(OpenAI 호환 usage 그대로 — prompt_tokens_details.
+      // cached_tokens 로 접두사 캐시 히트를 클라이언트에서도 관측 가능). agy 경로는 null.
+      보냄({ type: 'done', timedOut: job.timedOut, usage: job.usage || null, audit: job.audit });
     } catch (err) {
       보냄({ type: 'error', error: err.message });
     }

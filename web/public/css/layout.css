@@ -233,6 +233,16 @@ body {
 
 .cli-badge.off .cli-dot { background: var(--fg-3); }
 
+/* Z.AI 배지(키 파일 등록 상태) — 클릭해 키 삭제 가능함을 암시 */
+.cli-badge.removable {
+  cursor: pointer;
+  transition: background .15s ease;
+}
+.cli-badge.removable:hover { background: var(--surface-3); }
+
+/* Z.AI API Key 등록 버튼 영역(비어있으면 폭 0 — 등록되면 버튼이 사라짐) */
+.zai-key-area:empty { display: none; }
+
 /* 아이콘 버튼(테마 토글 등) — 32x32 보더 */
 .icon-btn {
   width: 32px;

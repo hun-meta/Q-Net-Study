@@ -199,8 +199,26 @@ const CHAT_ROLE = [
   '설명하면"이라고 전제하고 개념 위주로 답한다. 문서를 작성하지 말고 대화체로 답한다.',
 ].join('\n');
 
-function buildChatPrompt({ contextText, history, message }) {
+// 문항 메타 블록: 서버가 URL·body에서 이미 검증해 알고 있는 자격증·시험·문번을 프롬프트에
+// 직접 주입한다 — 클라이언트 contextText 유실·조립 레이스와 무관하게 항상 전달된다.
+// 같은 문항이면 턴이 반복돼도 바이트 단위로 동일한 문자열이 나오도록 조립을 고정한다
+// (Z.AI 암묵적 접두사 캐싱의 히트 조건). 값이 하나도 없으면 '' — 블록 자체를 생략.
+function buildChatMeta({ grade, cert, examId, qno } = {}) {
+  const lines = [];
+  if (grade || cert) lines.push(`자격증: ${[grade, cert].filter(Boolean).join(' / ')}`);
+  if (examId) lines.push(`시험: ${examId} (연도-회차-구분)`);
+  if (qno != null && qno !== '') lines.push(`문번: ${qno}`);
+  if (!lines.length) return '';
+  return ['# 문항 메타', ...lines].join('\n');
+}
+
+function buildChatPrompt({ grade, cert, examId, qno, contextText, history, message }) {
   const parts = [CHAT_ROLE, ''];
+  const meta = buildChatMeta({ grade, cert, examId, qno });
+  if (meta) {
+    parts.push(meta);
+    parts.push('');
+  }
   if (contextText) {
     parts.push('# 문항 컨텍스트');
     parts.push(contextText);
@@ -220,7 +238,19 @@ function buildChatPrompt({ contextText, history, message }) {
   return parts.join('\n');
 }
 
-// 정리 기록 프롬프트: 승인된 대화 + 목적지 + 규칙.
+// 정리 스타일 지시: 사용자가 파고든 주제는 확실히, 나머지는 핵심만 간결하게.
+// conversation 문자열은 프론트가 `[사용자] …` / `[어시스턴트] …` 마커로 조립한다
+// (panel.js) — 마커 기준으로 "추가 질문" 판별을 모델에 위임한다(서버 파싱 불필요).
+const RECORD_STYLE = [
+  '# 정리 스타일',
+  '- 대화에서 [사용자]가 추가 질문·되물음·확인으로 파고든 주제는 확실하게 정리한다:',
+  '  질문에 대한 답이 명확히 드러나도록 근거·예시·헷갈렸던 지점까지 포함한다.',
+  '- 그 외 스치듯 다뤄진 내용은 핵심 개념·결론 위주로 짧고 깔끔하게 요약한다.',
+  '- 전체 분량은 길지 않게 유지한다: 대화 재전사·반복 서술·불필요한 배경 설명 금지.',
+  '- 대화에 없는 내용을 새로 지어내지 않는다.',
+].join('\n');
+
+// 정리 기록 프롬프트: 승인된 대화 + 정리 스타일 + 목적지 + 규칙.
 function buildRecordPrompt({ examId, qno, conversation, destinations, nickname, today }) {
   const parts = [];
   parts.push('# 작업: 학습 대화를 저장소 규칙에 맞게 md로 정리·기록');
@@ -229,6 +259,8 @@ function buildRecordPrompt({ examId, qno, conversation, destinations, nickname, 
   parts.push('');
   parts.push('# 승인된 대화 내용');
   parts.push(String(conversation || ''));
+  parts.push('');
+  parts.push(RECORD_STYLE);
   parts.push('');
   parts.push('# 기록 목적지와 규칙');
   if (destinations.note) {
@@ -366,14 +398,51 @@ function createBridge(deps) {
   const repoRoot = d.repoRoot;
   const cli = d.cli || { chat: false, record: false };
   const audit = d.audit || require('./audit');
+  // 테스트 목 주입 용이성 위해 deps.resolveZai 허용, 기본은 config.resolveZai.
+  const resolveZaiFn = d.resolveZai || require('./config').resolveZai;
   // 브리지 인스턴스가 여러 개여도(cliRoutes·microworldRoutes) 잡은 전역 큐 하나로 직렬화.
   const enqueue = sharedEnqueue;
 
   const chatCmd = () => parseCommand(config.cliChat);
   const recordCmd = () => parseCommand(config.cliRecord);
 
-  // 챗(agy): 스트리밍. onData(chunk) 로 SSE 릴레이. 잡 후 무변화 감사.
+  // 챗: Z.AI 키가 있으면 HTTP 스트리밍(큐·감사 밖에서 즉시 실행) — 없으면 기존 agy 흐름 그대로.
+  // resolve는 호출 시점 평가(UI로 키를 등록·삭제해도 재기동 없이 다음 챗부터 반영).
   function chat(params) {
+    const zai = resolveZaiFn();
+    if (zai.enabled) {
+      // 관측 로그: 다른 잡(record 시작/questions 시작)과 같은 톤 — provider·model·effort만
+      // 남기고 API 키·프롬프트 내용은 절대 로그에 남기지 않는다.
+      logger.info('chat 시작', { provider: 'zai', model: zai.model, effort: zai.effort });
+      // 지연 require: cliBridge↔zaiChat 순환 require를 피하려고 호출 시점에 로드한다
+      // (zaiChat.js가 CHAT_ROLE 재사용을 위해 이 모듈을 top-level require 한다).
+      const zaiChat = require('./zaiChat');
+      return zaiChat
+        .streamChat({
+          zai,
+          meta: { grade: params.grade, cert: params.cert, examId: params.examId, qno: params.qno },
+          contextText: params.contextText,
+          history: params.history,
+          message: params.message,
+          onData: params.onData,
+          timeoutMs: TIMEOUTS.chat,
+          fetchImpl: params.fetchImpl, // 테스트 목 주입 통로(운영 시 undefined → 전역 fetch 사용).
+        })
+        .then((r) => {
+          // 캐시 관측: usage.prompt_tokens_details.cached_tokens 로 접두사 캐싱 히트를 확인한다.
+          // (키·프롬프트 내용은 절대 로그에 남기지 않는다 — 토큰 수치만.)
+          if (r && r.usage) {
+            logger.info('chat 완료', {
+              provider: 'zai',
+              promptTokens: r.usage.prompt_tokens,
+              cachedTokens:
+                (r.usage.prompt_tokens_details && r.usage.prompt_tokens_details.cached_tokens) || 0,
+              completionTokens: r.usage.completion_tokens,
+            });
+          }
+          return r;
+        });
+    }
     return enqueue(async () => {
       if (!cli.chat) {
         const err = new Error('agy(챗) CLI 가 감지되지 않았습니다.');
@@ -633,11 +702,14 @@ module.exports = {
   runProcess,
   parseClaudeStreamJson,
   createQueue,
+  buildChatMeta,
   buildChatPrompt,
   buildRecordPrompt,
   buildExtractPrompt,
   buildQuestionsPrompt,
   buildMicroworldPrompt,
   GUARD_PROMPT,
+  CHAT_ROLE,
+  RECORD_STYLE,
   TIMEOUTS,
 };

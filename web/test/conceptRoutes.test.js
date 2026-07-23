@@ -175,3 +175,41 @@ test('GET /api/notes: 없는 자격증 404 · 경로탈출 세그먼트 400', as
   const bad = await request(port, { reqPath: '/api/notes/..%2F..%2Fetc/x' });
   assert.equal(bad.status, 400);
 });
+
+test('GET /api/concept: grade/cert 쿼리로 자격증 분리(같은 시험ID 공유 시 이종 자격증 노트 차단)', async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'qnet-concept-xcert-'));
+  const write = (rel, content) => {
+    const abs = path.join(root, rel);
+    fs.mkdirSync(path.dirname(abs), { recursive: true });
+    fs.writeFileSync(abs, content, 'utf8');
+  };
+  // 기사와 산업기사가 같은 시험ID(2024-1-필기)/문번(1)을 공유
+  write(
+    path.join('정보처리', '정보처리기사', 'hun', 'notes', '소프트웨어설계', '01-요구사항확인.md'),
+    '## 요구사항 분석\n- 🔁 기출 2024-1-필기 #1: SDLC 모형\n'
+  );
+  write(
+    path.join('정보처리', '정보처리산업기사', 'hun', 'notes', '정보시스템기반기술', '01-응용SW기초기술활용.md'),
+    '## 운영체제 기초\n- 🔁 기출 2024-1-필기 #1: OS 개념\n'
+  );
+  const { server, port } = await startServer(root);
+  t.after(() => { server.close(); fs.rmSync(root, { recursive: true, force: true }); });
+
+  // 필터 없음 → 양쪽 자격증 노트 모두(2건)
+  const all = await request(port, { reqPath: '/api/concept/2024-1-필기/1' });
+  const allData = JSON.parse(all.body);
+  assert.equal(all.status, 200);
+  assert.equal(allData.노트.length, 2, '필터 없으면 두 자격증 노트 모두');
+
+  // cert=정보처리기사 → 기사만
+  const gi = await request(port, { reqPath: '/api/concept/2024-1-필기/1?cert=정보처리기사' });
+  const giData = JSON.parse(gi.body);
+  assert.equal(giData.노트.length, 1);
+  assert.equal(giData.노트[0].cert, '정보처리기사');
+
+  // cert=정보처리산업기사 → 산업기사만
+  const san = await request(port, { reqPath: '/api/concept/2024-1-필기/1?cert=정보처리산업기사' });
+  const sanData = JSON.parse(san.body);
+  assert.equal(sanData.노트.length, 1);
+  assert.equal(sanData.노트[0].cert, '정보처리산업기사');
+});
