@@ -189,10 +189,26 @@ function noteCard(note) {
   const meta = el('div', 'panel-note-meta', note.본인여부 ? `${note.닉네임} (나) · ${note.섹션제목}` : `${note.닉네임} · ${note.섹션제목}`);
   card.append(meta);
   const body = el('div', 'md-body');
-  if (note.본문html) body.innerHTML = note.본문html;
+  if (note.본문html) {
+    body.innerHTML = note.본문html;
+    foldExamTags(body);
+  }
   else body.append(el('pre', 'panel-note-pre', note.본문md || ''));
   card.append(body);
   return card;
+}
+// 🔁 기출 연계 태그 목록을 <details>로 접는다(디폴트 닫힘). 태그가 너무 많아 정신없는 것을 완화.
+// 🔁 라인만으로 이루어진 <ul>을 details로 변환(개념 설명과 섞인 리스트는 그대로 둔다).
+function foldExamTags(container) {
+  for (const list of [...container.querySelectorAll('ul')]) {
+    const lis = [...list.children].filter((c) => c.tagName === 'LI');
+    if (!lis.length) continue;
+    const tags = lis.filter((li) => li.textContent.includes('🔁'));
+    if (!tags.length || tags.length !== lis.length) continue;
+    const details = el('details', 'panel-tag-fold');
+    list.replaceWith(details);
+    details.append(el('summary', 'panel-tag-fold-summary', `📎 기출 연계 (${tags.length})`), list);
+  }
 }
 
 function solutionCard(sol) {
