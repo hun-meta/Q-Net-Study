@@ -2,6 +2,7 @@
 // 개념: /api/concept 섹션 렌더(내/타인 노트·공유 해설). 챗: agy 스트리밍(표시 전용) + 정리해줘 승인.
 
 import { apiFetch, getState } from '../store.js';
+import { foldExamTags } from '../foldTags.js';
 
 const enc = encodeURIComponent;
 
@@ -196,19 +197,6 @@ function noteCard(note) {
   else body.append(el('pre', 'panel-note-pre', note.본문md || ''));
   card.append(body);
   return card;
-}
-// 🔁 기출 연계 태그 목록을 <details>로 접는다(디폴트 닫힘). 태그가 너무 많아 정신없는 것을 완화.
-// 🔁 라인만으로 이루어진 <ul>을 details로 변환(개념 설명과 섞인 리스트는 그대로 둔다).
-function foldExamTags(container) {
-  for (const list of [...container.querySelectorAll('ul')]) {
-    const lis = [...list.children].filter((c) => c.tagName === 'LI');
-    if (!lis.length) continue;
-    const tags = lis.filter((li) => li.textContent.includes('🔁'));
-    if (!tags.length || tags.length !== lis.length) continue;
-    const details = el('details', 'panel-tag-fold');
-    list.replaceWith(details);
-    details.append(el('summary', 'panel-tag-fold-summary', `📎 기출 연계 (${tags.length})`), list);
-  }
 }
 
 function solutionCard(sol) {

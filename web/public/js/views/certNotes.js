@@ -3,6 +3,7 @@
 // 한 화면에서 열람한다. 타인 정리는 읽기 전용(수정 경로 없음). 저자 필터로 좁혀 볼 수 있다.
 
 import { getState } from '../store.js';
+import { foldExamTags } from '../foldTags.js';
 
 function el(tag, cls, text) {
   const node = document.createElement(tag);
@@ -186,13 +187,16 @@ function noteCard(n, me) {
   const meta = el('div', 'cn-note-meta');
   if (n.진행도) meta.append(el('span', 'cn-tag', n.진행도));
   if (n.갱신일) meta.append(el('span', 'cn-date', n.갱신일));
-  for (const ref of n.기출참조 || []) meta.append(el('span', 'cn-ref', `🔁 ${ref}`));
+  if (n.기출참조 && n.기출참조.length) meta.append(el('span', 'cn-ref', `🔁 ${n.기출참조.length}건`));
   if (!mine) meta.append(svg(LOCK_SVG, 'cn-lock'));
   left.append(meta);
   sum.append(left);
   d.append(sum);
   const body = el('div', 'md-body cn-body');
-  if (n.본문html) body.innerHTML = n.본문html;
+  if (n.본문html) {
+    body.innerHTML = n.본문html;
+    foldExamTags(body);
+  }
   else body.append(el('pre', 'cn-pre', n.본문md || ''));
   d.append(body);
   return d;
