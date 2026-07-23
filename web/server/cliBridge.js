@@ -199,8 +199,26 @@ const CHAT_ROLE = [
   '설명하면"이라고 전제하고 개념 위주로 답한다. 문서를 작성하지 말고 대화체로 답한다.',
 ].join('\n');
 
-function buildChatPrompt({ contextText, history, message }) {
+// 문항 메타 블록: 서버가 URL·body에서 이미 검증해 알고 있는 자격증·시험·문번을 프롬프트에
+// 직접 주입한다 — 클라이언트 contextText 유실·조립 레이스와 무관하게 항상 전달된다.
+// 같은 문항이면 턴이 반복돼도 바이트 단위로 동일한 문자열이 나오도록 조립을 고정한다
+// (Z.AI 암묵적 접두사 캐싱의 히트 조건). 값이 하나도 없으면 '' — 블록 자체를 생략.
+function buildChatMeta({ grade, cert, examId, qno } = {}) {
+  const lines = [];
+  if (grade || cert) lines.push(`자격증: ${[grade, cert].filter(Boolean).join(' / ')}`);
+  if (examId) lines.push(`시험: ${examId} (연도-회차-구분)`);
+  if (qno != null && qno !== '') lines.push(`문번: ${qno}`);
+  if (!lines.length) return '';
+  return ['# 문항 메타', ...lines].join('\n');
+}
+
+function buildChatPrompt({ grade, cert, examId, qno, contextText, history, message }) {
   const parts = [CHAT_ROLE, ''];
+  const meta = buildChatMeta({ grade, cert, examId, qno });
+  if (meta) {
+    parts.push(meta);
+    parts.push('');
+  }
   if (contextText) {
     parts.push('# 문항 컨텍스트');
     parts.push(contextText);
@@ -399,15 +417,31 @@ function createBridge(deps) {
       // 지연 require: cliBridge↔zaiChat 순환 require를 피하려고 호출 시점에 로드한다
       // (zaiChat.js가 CHAT_ROLE 재사용을 위해 이 모듈을 top-level require 한다).
       const zaiChat = require('./zaiChat');
-      return zaiChat.streamChat({
-        zai,
-        contextText: params.contextText,
-        history: params.history,
-        message: params.message,
-        onData: params.onData,
-        timeoutMs: TIMEOUTS.chat,
-        fetchImpl: params.fetchImpl, // 테스트 목 주입 통로(운영 시 undefined → 전역 fetch 사용).
-      });
+      return zaiChat
+        .streamChat({
+          zai,
+          meta: { grade: params.grade, cert: params.cert, examId: params.examId, qno: params.qno },
+          contextText: params.contextText,
+          history: params.history,
+          message: params.message,
+          onData: params.onData,
+          timeoutMs: TIMEOUTS.chat,
+          fetchImpl: params.fetchImpl, // 테스트 목 주입 통로(운영 시 undefined → 전역 fetch 사용).
+        })
+        .then((r) => {
+          // 캐시 관측: usage.prompt_tokens_details.cached_tokens 로 접두사 캐싱 히트를 확인한다.
+          // (키·프롬프트 내용은 절대 로그에 남기지 않는다 — 토큰 수치만.)
+          if (r && r.usage) {
+            logger.info('chat 완료', {
+              provider: 'zai',
+              promptTokens: r.usage.prompt_tokens,
+              cachedTokens:
+                (r.usage.prompt_tokens_details && r.usage.prompt_tokens_details.cached_tokens) || 0,
+              completionTokens: r.usage.completion_tokens,
+            });
+          }
+          return r;
+        });
     }
     return enqueue(async () => {
       if (!cli.chat) {
@@ -668,6 +702,7 @@ module.exports = {
   runProcess,
   parseClaudeStreamJson,
   createQueue,
+  buildChatMeta,
   buildChatPrompt,
   buildRecordPrompt,
   buildExtractPrompt,

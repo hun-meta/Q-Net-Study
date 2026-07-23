@@ -206,12 +206,10 @@ function solutionCard(sol) {
 }
 
 // ── 챗 탭 ────────────────────────────────────────────────────────────────────
+// 시험·문번·자격증 메타는 서버가 챗 요청 시 직접 주입한다(cliRoutes → buildChatMeta) —
+// 여기서는 서버가 모르는 보조 자료만 조립한다: 미추출 기출의 PDF 경로 폴백 + 연결 노트·해설.
 async function buildContextText(ctx, qno) {
-  const lines = [
-    '[문항 컨텍스트]',
-    `시험: ${ctx.examId} / 문번: ${qno}`,
-    `자격증: ${ctx.grade} / ${ctx.cert}`,
-  ];
+  const lines = [];
   // 문항 md가 추출되어 있으면 서버가 챗 요청 시 [문항 원문]을 직접 주입한다
   // (mode별 정답 스트립도 서버 소유). 그 경우 PDF 전체 참조는 불필요 —
   // 미추출 기출만 PDF 경로 폴백을 남긴다.
@@ -277,10 +275,13 @@ function renderChatTab() {
   const footer = el('div', 'panel-chat-foot');
   bodyEl.append(footer);
 
-  // 컨텍스트 칩 보강(문항 데이터·노트/해설 수).
-  buildContextText(ctx, qno).then(({ text, counts, 문항있음 }) => {
-    active._contextText = text;
-    if (!active || active.tab !== 'chat') return;
+  // 컨텍스트 칩 보강(문항 데이터·노트/해설 수). 프라미스를 세션에 보관해 첫 전송이
+  // 컨텍스트 확정을 기다릴 수 있게 한다 — 빈 컨텍스트로 나간 1턴이 2턴째부터의
+  // 접두사(캐시)와 어긋나는 것을 방지. sess 캡처로 패널 재오픈 세션 오염도 막는다.
+  const sess = active;
+  sess._contextPromise = buildContextText(ctx, qno).then(({ text, counts, 문항있음 }) => {
+    sess._contextText = text;
+    if (active !== sess || active.tab !== 'chat') return;
     if (문항있음) chips.append(chatChip('문항 ✓'));
     if (counts.notes) chips.append(chatChip(`연결 노트 ${counts.notes}`));
     if (counts.sols) chips.append(chatChip(`공유 해설 ${counts.sols}`));
@@ -327,18 +328,25 @@ function renderChatTab() {
 
   async function ask() {
     const msg = input.value.trim();
-    if (!msg || active._streaming) return;
+    if (!msg || sess._streaming) return;
     input.value = '';
     send.disabled = true;
     input.disabled = true;
-    active._streaming = true;
+    sess._streaming = true;
     bubble(log, 'user', msg);
-    active.history.push({ role: 'user', text: msg });
+    sess.history.push({ role: 'user', text: msg });
     const ans = bubble(log, 'assistant', '', true);
     try {
+      // 보조 컨텍스트(연결 노트·PDF 폴백) 확정 대기 — 1턴째와 2턴째의 컨텍스트가
+      // 달라지면 서버 접두사 캐시가 깨진다. 실패해도 메타는 서버가 주입하므로 무시.
+      try {
+        await sess._contextPromise;
+      } catch (_e) {
+        /* 보조 컨텍스트 실패 무시 */
+      }
       const res = await apiFetch(`/api/chat/${enc(ctx.examId)}/${enc(qno)}`, {
         method: 'POST',
-        body: { grade: ctx.grade, cert: ctx.cert, mode: ctx.mode === 'view' ? 'view' : 'solve', contextText: active._contextText || '', history: active.history.slice(0, -1), message: msg },
+        body: { grade: ctx.grade, cert: ctx.cert, mode: ctx.mode === 'view' ? 'view' : 'solve', contextText: sess._contextText || '', history: sess.history.slice(0, -1), message: msg },
       });
       if (!res.ok) {
         const d = await res.json().catch(() => ({}));
@@ -356,18 +364,21 @@ function renderChatTab() {
         } else if (evt.type === 'error') {
           ans.textEl.textContent = evt.error || '오류';
           ans.bubbleEl.classList.add('error');
+        } else if (evt.type === 'done' && evt.usage) {
+          // 캐시 관측(개발자 도구 전용): cached_tokens > 0 이면 접두사 캐시 히트.
+          console.debug('[챗 usage]', evt.usage);
         }
       });
       stopCursor(ans);
       if (acc && !ans.bubbleEl.classList.contains('error')) renderMd(ans.bubbleEl, acc);
-      active.history.push({ role: 'assistant', text: acc });
+      sess.history.push({ role: 'assistant', text: acc });
       approveBtn.disabled = false;
     } catch (e) {
       ans.textEl.textContent = e.message;
       ans.bubbleEl.classList.add('error');
       stopCursor(ans);
     } finally {
-      active._streaming = false;
+      sess._streaming = false;
       send.disabled = false;
       input.disabled = false;
       input.focus();

@@ -143,3 +143,14 @@ test('buildChatContext: solve는 정답 스트립, view는 유지, 클라 컨텍
   const 폴백 = questionStore.buildChatContext({ 원문md: null, mode: 'solve', clientContext: 'PDF 참조' });
   assert.strictEqual(폴백, 'PDF 참조');
 });
+
+test('buildChatContext: 추출도구·추출일은 모드와 무관하게 제거(프롬프트 접두사 노이즈 정리)', () => {
+  for (const mode of ['solve', 'view']) {
+    const out = questionStore.buildChatContext({ 원문md: 샘플, mode, clientContext: '' });
+    assert.ok(!/추출도구/.test(out), `${mode}: 추출도구 줄이 제거되어야 함`);
+    assert.ok(!/추출일/.test(out), `${mode}: 추출일 줄이 제거되어야 함`);
+    // 학습에 유의미한 키·본문은 보존.
+    assert.ok(out.includes('과목: 소프트웨어 설계'));
+    assert.ok(out.includes('② 두 번째 선택지'));
+  }
+});

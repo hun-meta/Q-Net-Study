@@ -7,11 +7,11 @@
 // 신규 npm 의존성 없음 — Node 18+ 전역 fetch 사용, fetchImpl 주입 가능(테스트).
 // API 키는 요청 헤더 조립에만 쓰고 어떤 로그·반환값에도 남기지 않는다.
 
-// CHAT_ROLE 은 cliBridge.js 가 소유(재사용 목적으로 그쪽에서 export). cliBridge.js 는
-// 이 모듈을 함수 호출 시점에 지연 require 하므로(순환 require 회피), 이 top-level
-// require 는 안전하다 — 이 파일이 먼저 로드돼도 cliBridge.js는 자기 완결적으로 끝까지
-// 로드된 뒤 CHAT_ROLE 을 export 한다.
-const { CHAT_ROLE } = require('./cliBridge');
+// CHAT_ROLE·buildChatMeta 는 cliBridge.js 가 소유(재사용 목적으로 그쪽에서 export).
+// cliBridge.js 는 이 모듈을 함수 호출 시점에 지연 require 하므로(순환 require 회피),
+// 이 top-level require 는 안전하다 — 이 파일이 먼저 로드돼도 cliBridge.js는 자기
+// 완결적으로 끝까지 로드된 뒤 export 한다.
+const { CHAT_ROLE, buildChatMeta } = require('./cliBridge');
 
 // effort → Z.AI 요청 필드 매핑을 한 함수에 격리(스펙 변경 시 여기만 수정).
 // 기본('none'/falsy) = deep think(thinking) 비활성 — 챗은 빠른 답변이 목적이라 기본으로 끈다.
@@ -21,9 +21,16 @@ function effortPayload(effort) {
   return { thinking: { type: 'enabled' }, reasoning_effort: effort };
 }
 
-// system(+문항 컨텍스트) · history · message → OpenAI 호환 messages 배열.
-function buildMessages({ contextText, history, message }) {
+// system(역할+문항 메타+문항 컨텍스트) · history · message → OpenAI 호환 messages 배열.
+//
+// 접두사 캐싱 설계: Z.AI 는 암묵적(implicit) 접두사 캐싱이라 별도 파라미터가 없다 —
+// 히트 조건은 "같은 접두사가 바이트 단위로 반복"되는 것뿐이다. 그래서 변하지 않는 것
+// (역할 → 문항 메타 → 문항 원문)을 system 맨 앞에 고정하고, 대화는 append-only 로
+// 뒤에만 쌓아 같은 문항의 2턴째부터 system+이전 대화 전체가 캐시 히트되게 한다.
+function buildMessages({ meta, contextText, history, message }) {
   let system = CHAT_ROLE;
+  const metaBlock = buildChatMeta(meta || {});
+  if (metaBlock) system += `\n\n${metaBlock}`;
   if (contextText) system += `\n\n# 문항 컨텍스트\n${contextText}`;
   const messages = [{ role: 'system', content: system }];
   if (Array.isArray(history)) {
@@ -38,6 +45,8 @@ function buildMessages({ contextText, history, message }) {
 
 // SSE 한 줄("data: {...}" / "data: [DONE]")을 처리해 델타를 즉시 릴레이한다.
 // reasoning_content 델타는 화면 오염 방지를 위해 릴레이하지 않는다(무시).
+// usage 필드(stream_options.include_usage 로 요청한 마지막 청크)는 state.usage 에
+// 보관한다 — prompt_tokens_details.cached_tokens 가 접두사 캐시 히트의 유일한 증거다.
 // 반환: '[DONE]' 수신 시 true(스트림 종료 신호), 그 외 false.
 function handleSseLine(line, state, onData) {
   const trimmed = line.trim();
@@ -51,6 +60,7 @@ function handleSseLine(line, state, onData) {
   } catch (_e) {
     return false; // 파싱 불가 라인은 무시(방어적).
   }
+  if (evt && evt.usage) state.usage = evt.usage; // 뒤에 온 usage가 이긴다(통상 최종 1회).
   const delta = evt && evt.choices && evt.choices[0] && evt.choices[0].delta;
   if (delta && typeof delta.content === 'string' && delta.content) {
     state.text += delta.content;
@@ -61,8 +71,11 @@ function handleSseLine(line, state, onData) {
 }
 
 // Z.AI 챗 컴플리션을 스트리밍 호출한다.
-// → Promise<{ text, timedOut, code: 0, audit: { clean: true, skipped: 'zai-http' } }>
-async function streamChat({ zai, contextText, history, message, onData, timeoutMs, fetchImpl }) {
+// → Promise<{ text, timedOut, code: 0, usage: object|null,
+//             audit: { clean: true, skipped: 'zai-http' } }>
+// usage 는 OpenAI 호환 형태 그대로: { prompt_tokens, completion_tokens,
+// prompt_tokens_details: { cached_tokens }, ... } — 미수신 시 null.
+async function streamChat({ zai, meta, contextText, history, message, onData, timeoutMs, fetchImpl }) {
   const doFetch = fetchImpl || (typeof fetch === 'function' ? fetch : null);
   if (!doFetch) {
     throw new Error('전역 fetch를 사용할 수 없습니다(Node 18 이상이 필요합니다).');
@@ -70,8 +83,10 @@ async function streamChat({ zai, contextText, history, message, onData, timeoutM
 
   const body = JSON.stringify({
     model: zai.model,
-    messages: buildMessages({ contextText, history, message }),
+    messages: buildMessages({ meta, contextText, history, message }),
     stream: true,
+    // 스트림 마지막 청크로 usage(캐시 히트 관측)를 받기 위한 OpenAI 호환 옵션.
+    stream_options: { include_usage: true },
     ...effortPayload(zai.effort),
   });
 
@@ -86,7 +101,7 @@ async function streamChat({ zai, contextText, history, message, onData, timeoutM
       }, timeoutMs)
     : null;
 
-  const state = { text: '' };
+  const state = { text: '', usage: null };
 
   try {
     let res;
@@ -103,7 +118,7 @@ async function streamChat({ zai, contextText, history, message, onData, timeoutM
     } catch (err) {
       // AbortController가 타임아웃으로 요청 자체를 취소한 경우 — throw가 아니라
       // 지금까지 누적된 텍스트(요청 단계라 보통 빈 문자열)와 함께 timedOut:true 반환.
-      if (timedOut) return { text: state.text, timedOut: true, code: 0, audit: { clean: true, skipped: 'zai-http' } };
+      if (timedOut) return { text: state.text, timedOut: true, code: 0, usage: state.usage, audit: { clean: true, skipped: 'zai-http' } };
       throw new Error(`Z.AI 챗 API 요청 실패: ${err.message}`);
     }
 
@@ -154,7 +169,7 @@ async function streamChat({ zai, contextText, history, message, onData, timeoutM
     if (timer) clearTimeout(timer);
   }
 
-  return { text: state.text, timedOut, code: 0, audit: { clean: true, skipped: 'zai-http' } };
+  return { text: state.text, timedOut, code: 0, usage: state.usage, audit: { clean: true, skipped: 'zai-http' } };
 }
 
 module.exports = {
