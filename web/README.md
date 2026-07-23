@@ -5,13 +5,14 @@
 
 ## 실행 전제
 
-| 도구 | 용도 | 필수 여부 | 확인 |
+| 도구/설정 | 용도 | 필수 여부 | 확인 |
 |------|------|-----------|------|
 | Node.js ≥ 18 | 서버 실행 | **필수** | `node -v` |
 | Claude Code (`claude`) 설치 + 로그인 | 정리·기록, 정답 추출(파일 직접 쓰기) | 선택(없으면 해당 기능만 비활성) | `claude --version` |
-| antigravity (`agy`) 설치 + 로그인 | 문항 챗 질의응답(표시만) | 선택(없으면 챗만 비활성) | `agy --version` |
+| **Z.AI API Key** | 문항 챗 질의응답(표시만) | 선택(키 등록 시 `agy` CLI 없이 동작) | 환경변수 `ZAI_API_KEY` 또는 웹 UI 설정 |
+| antigravity (`agy`) 설치 + 로그인 | Z.AI API Key 미설정 시 문항 챗 폴백 | 선택(없으면 챗만 비활성) | `agy --version` |
 
-두 CLI는 서버가 `claude --dangerously-skip-permissions` / `agy --dangerously-skip-permissions`로 호출합니다(명령은 `.qnet-web/config.json`에서 재정의 가능). 미설치·미로그인이면 상단 배너로 안내되고 해당 AI 기능만 비활성화되며, **풀이·채점·기록 열람·정답 수동 입력은 계속 동작합니다.**
+두 CLI는 서버가 `claude --dangerously-skip-permissions` / `agy --dangerously-skip-permissions`로 호출합니다(명령은 `.qnet-web/config.json`에서 재정의 가능). Z.AI API Key가 설정되면 `agy` CLI 대신 직접 HTTP API 호출로 챗을 처리하여 더욱 빠른 속도를 제공합니다. 미설치·미로그인·미설정이면 상단 배너로 안내되고 해당 AI 기능만 비활성화되며, **풀이·채점·기록 열람·정답 수동 입력은 계속 동작합니다.**
 
 ## 설치 · 기동
 
@@ -22,6 +23,25 @@ npm start          # 127.0.0.1:4525 기본, 점유 시 4526~4535 탐색
 ```
 
 브라우저에서 기동 배너에 표시된 주소로 접속 → 닉네임 선택 → 기출 목록.
+
+## Z.AI API 설정 (챗 기능 최적화)
+
+문항별 챗 질의응답 속도를 높이기 위해 `antigravity` CLI 대신 Z.AI API를 직접 활용할 수 있습니다. API Key가 감지되면 시스템은 자동으로 `Z.AI` 제공자(`provider: 'zai'`)로 전환하여 동작합니다.
+
+### 1. API Key 등록 방법 (우선순위 순)
+- **환경 변수**: 시스템 환경 변수 `ZAI_API_KEY`에 API 키 값을 지정합니다.
+  ```bash
+  export ZAI_API_KEY="your-zai-api-key-here"
+  ```
+- **웹 UI 등록**: 서버 기동 후 브라우저 헤더의 **"API Key 등록하기"** 버튼을 클릭하여 입력합니다. 
+  - 등록 시 `.qnet-web/secrets.json` 파일에 `mode 0o600` (소유자 전용 읽기/쓰기) 권한으로 안전하게 원자적 저장됩니다.
+  - 저장된 키는 웹 UI 상단 챗 배지를 클릭하여 손쉽게 삭제(기존 `agy`로 폴백)할 수 있습니다.
+
+### 2. 세부 환경 변수 설정 (선택 사항)
+Z.AI API 동작을 커스터마이징하고 싶다면 다음 환경 변수를 사용할 수 있습니다.
+- `ZAI_BASE_URL`: Z.AI 챗 완성 API의 기본 URL을 지정합니다. (기본값: `https://api.z.ai/api/coding/paas/v4`)
+- `ZAI_MODEL`: 챗 응답에 사용할 모델을 설정합니다. (기본값: `glm-5.2`)
+- `ZAI_EFFORT`: 사고 모드(Deep Think)의 수준을 설정합니다. (기본값: `none` - 빠른 대화를 위해 기본 비활성화. `low`, `medium`, `high` 등으로 설정 가능)
 
 ## 사용 플로우
 
@@ -46,7 +66,8 @@ npm start          # 127.0.0.1:4525 기본, 점유 시 4526~4535 탐색
 
 | 증상 | 원인 · 해결 |
 |------|-------------|
-| 배너에 "agy/claude 미설치" | 해당 CLI 미설치·미로그인. `claude --version`/`agy --version` 확인 후 로그인. 챗/자동 정리·추출만 비활성이며 나머지는 정상. |
+| 배너에 "agy/claude 미설치" | 해당 CLI 미설치·미로그인. `claude --version`/`agy --version` 확인 후 로그인. 챗/자동 정리·추출만 비활성이며 나머지는 정상 (Z.AI API Key 등록 시 챗 기능은 정상 기동). |
+| Z.AI 챗 API 오류 (401/403 등) | 등록한 API Key가 만료되었거나 올바르지 않은 것입니다. 웹 UI에서 챗 배지를 클릭해 키를 삭제 후 재등록하거나 환경변수를 점검하세요. |
 | 기동 실패 "사용 가능한 포트를 찾지 못했습니다" | 4525~4535가 모두 점유됨. 점유 프로세스 종료 후 재시도(포트는 `.qnet-web/config.json`의 `port`로 조정). |
 | 챗/정리 버튼 비활성 | 상단 배너의 CLI 감지 상태 확인. 미로그인 시 `claude`/`agy`를 한 번 대화형으로 실행해 로그인. |
 | 정답 추출 후 "수동 입력 폼" 표시 | 자동 구조 검증 실패(문항수 불일치·정답 도메인·숨김페이지수 범위 등) 또는 스캔 이미지. 폼으로 정답 md를 직접 작성하면 채점 가능. |
